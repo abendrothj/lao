@@ -1,2 +1,21 @@
-lao-orchestrator-core = { path = "../../../core" }
-serde_yaml = "0.9" 
+[package]
+name = "lao-ui"
+version = "0.1.0"
+edition = "2021"
+description = "Tauri + Svelte UI for LAO Orchestrator"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+lao-orchestrator-core = { path = "../../core" }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[[bin]]
+name = "lao-ui"
+path = "src-tauri/src/main.rs"
+
+[package.metadata.tauri] 

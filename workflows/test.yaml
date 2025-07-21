@@ -1,6 +1,4 @@
-workflow: "Test Echo Workflow"
+workflow: "Echo Test"
 steps:
-  - run: echo
-    message: "Step 1: Hello from echo!"
-  - run: echo
-    message: "Step 2: This is the second step." 
+  - run: Echo
+    input: "Step 1: Hello from echo!" 

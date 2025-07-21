@@ -1,5 +1,10 @@
 # ⚡️ LAO: Local AI Workflow Orchestrator
 
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Made with Rust](https://img.shields.io/badge/Made%20with-Rust-orange?logo=rust)
+![Powered by Tauri](https://img.shields.io/badge/Powered%20by-Tauri-blueviolet?logo=tauri)
+![Runs Offline](https://img.shields.io/badge/Runs-Offline-success?logo=powerbi&logoColor=white)
+
 > Chain. Build. Run. All offline.
 > LAO is how developers bend AI to their will—no cloud, no compromise.
 
@@ -122,7 +127,8 @@ Built by devs, for devs—with room to customize everything. We don’t chase tr
 
 ## 📄 License
 
-MIT (open-source and unboxed)
+MIT — feel free to fork, remix, and build amazing things. See [`LICENSE`](./LICENSE).
+
 
 ---
 

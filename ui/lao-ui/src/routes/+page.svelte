@@ -4,10 +4,56 @@
   let name = $state("");
   let greetMsg = $state("");
 
+  // FlowBuilder state
+  let workflowPath = $state("");
+  let graph = $state(null);
+  let error = $state("");
+  let newNodeName = $state("");
+  let newNodeType = $state("Echo");
+  let yamlExport = $state("");
+
   async function greet(event) {
     event.preventDefault();
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
     greetMsg = await invoke("greet", { name });
+  }
+
+  async function loadGraph() {
+    error = "";
+    try {
+      graph = await invoke("get_workflow_graph", { path: workflowPath });
+    } catch (e) {
+      error = e.message || e;
+      graph = null;
+    }
+  }
+
+  function addNode() {
+    if (!graph) return;
+    const id = `step${graph.nodes.length + 1}`;
+    graph.nodes = [
+      ...graph.nodes,
+      { id, run: newNodeType, input_type: null, output_type: null, status: "pending" }
+    ];
+    newNodeName = "";
+    newNodeType = "Echo";
+  }
+
+  function removeNode(id) {
+    if (!graph) return;
+    graph.nodes = graph.nodes.filter(n => n.id !== id);
+    graph.edges = graph.edges.filter(e => e.from !== id && e.to !== id);
+  }
+
+  function exportYAML() {
+    if (!graph) return;
+    let yaml = `workflow: "Visual Flow"
+steps:
+`;
+    for (const node of graph.nodes) {
+      yaml += `  - run: ${node.run}
+`;
+    }
+    yamlExport = yaml;
   }
 </script>
 
@@ -32,6 +78,46 @@
     <button type="submit">Greet</button>
   </form>
   <p>{greetMsg}</p>
+
+  <section style="margin-top: 2em;">
+    <h2>Visual Flow Builder</h2>
+    <input placeholder="Workflow YAML path..." bind:value={workflowPath} />
+    <button onclick={loadGraph}>Load Workflow</button>
+    {#if error}
+      <p style="color: red;">{error}</p>
+    {/if}
+    {#if graph}
+      <div style="margin-top: 1em;">
+        <h3>Nodes</h3>
+        <ul>
+          {#each graph.nodes as node}
+            <li>
+              <b>{node.id}</b>: {node.run} (<i>{node.status}</i>)
+              <button onclick={() => removeNode(node.id)}>Remove</button>
+            </li>
+          {/each}
+        </ul>
+        <h3>Add Node</h3>
+        <input placeholder="Node name (optional)" bind:value={newNodeName} />
+        <select bind:value={newNodeType}>
+          <option>Echo</option>
+          <option>Whisper</option>
+          <option>Ollama</option>
+        </select>
+        <button onclick={addNode}>Add Node</button>
+        <h3>Edges</h3>
+        <ul>
+          {#each graph.edges as edge}
+            <li>{edge.from} → {edge.to}</li>
+          {/each}
+        </ul>
+        <button onclick={exportYAML}>Export as YAML</button>
+        {#if yamlExport}
+          <pre>{yamlExport}</pre>
+        {/if}
+      </div>
+    {/if}
+  </section>
 </main>
 
 <style>

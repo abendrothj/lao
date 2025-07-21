@@ -10,22 +10,28 @@ use std::fs;
 use std::process::Command;
 use std::collections::HashMap;
 use std::time::Instant;
-mod plugins;
+use std::{thread, time::Duration};
+use std::env as std_env;
+pub mod plugins;
 use plugins::*;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Workflow {
     pub workflow: String,
     pub steps: Vec<WorkflowStep>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct WorkflowStep {
     pub run: String,
     #[serde(flatten)]
     pub params: serde_yaml::Value,
     #[serde(default)]
     pub retries: Option<u32>,
+    #[serde(default)]
+    pub retry_delay: Option<u64>, // milliseconds
+    #[serde(default)]
+    pub cache_key: Option<String>,
     #[serde(default)]
     pub input_from: Option<String>,
     #[serde(default)]
@@ -77,7 +83,7 @@ pub fn run_model_runner(runner: &str, params: serde_yaml::Value) -> Result<Strin
     } else {
         // Fallback: pass all params as stringified args
         for (k, v) in params.as_mapping().unwrap_or(&serde_yaml::Mapping::new()) {
-            cmd.arg(format!("--{}", k)).arg(v.to_string());
+            cmd.arg(format!("--{:?}", k)).arg(format!("{:?}", v));
         }
     }
     // Run the command and capture output
@@ -88,7 +94,7 @@ pub fn run_model_runner(runner: &str, params: serde_yaml::Value) -> Result<Strin
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn build_dag(steps: &[WorkflowStep]) -> Result<Vec<DagNode>, String> {
+pub fn build_dag(steps: &[WorkflowStep]) -> Result<Vec<DagNode>, String> {
     let mut nodes = Vec::new();
     for (i, step) in steps.iter().enumerate() {
         let id = format!("step{}", i + 1);
@@ -140,7 +146,7 @@ fn topo_sort(nodes: &[DagNode]) -> Result<Vec<String>, String> {
     Ok(order)
 }
 
-fn validate_workflow_types(
+pub fn validate_workflow_types(
     dag: &[DagNode],
     plugin_registry: &PluginRegistry,
 ) -> Vec<(usize, String)> {
@@ -168,7 +174,7 @@ fn validate_workflow_types(
 pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
     let workflow = load_workflow_yaml(path)?;
     let dag = build_dag(&workflow.steps)?;
-    let plugin_registry = PluginRegistry::default_registry();
+    let mut plugin_registry = PluginRegistry::default_registry();
     let validation_errors = validate_workflow_types(&dag, &plugin_registry);
     let mut logs = Vec::new();
     if !validation_errors.is_empty() {
@@ -204,30 +210,102 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
         }
         substitute_params(&mut params, &outputs);
         let retries = step.retries.unwrap_or(1);
+        let retry_delay = step.retry_delay.unwrap_or(500); // ms
         let mut last_err = None;
         let mut output = None;
         let mut attempt = 0;
         let start_time = Instant::now();
         let mut input_type = None;
         let mut output_type = None;
-        let mut validation = Some("ok".into());
+        let mut validation: Option<String> = Some("ok".into());
+        // Caching logic
+        let cache_dir = std_env::var("LAO_CACHE_DIR").unwrap_or_else(|_| "cache".to_string());
+        std::fs::create_dir_all(&cache_dir).ok();
+        let cache_key = step.cache_key.as_ref().map(|k| k.clone());
+        let cache_path = cache_key.as_ref().map(|k| format!("{}/{}.json", cache_dir, k));
+        let mut cache_status = None;
+        if let Some(ref path) = cache_path {
+            if let Ok(cached) = std::fs::read_to_string(path) {
+                if let Ok(val) = serde_json::from_str::<String>(&cached) {
+                    println!("STEP {}: cache hit for key {}", step.run, path);
+                    output = Some(val.clone());
+                    outputs.insert(node_id.clone(), val);
+                    cache_status = Some("hit".to_string());
+                    logs.push(StepLog {
+                        step: node_id[4..].parse().unwrap_or(0),
+                        runner: step.run.clone(),
+                        input: params.clone(),
+                        output: output.clone(),
+                        error: None,
+                        attempt: 0,
+                        input_type: None,
+                        output_type: None,
+                        validation: Some("cache".into()),
+                    });
+                    continue;
+                }
+            }
+            cache_status = Some("miss".to_string());
+        }
         for try_num in 1..=retries {
             attempt = try_num;
-            if let Some(plugin) = plugin_registry.get(&step.run) {
+            if try_num > 1 {
+                let delay = retry_delay * 2u64.pow((try_num - 2) as u32);
+                println!("STEP {}: retry {} after {}ms", step.run, try_num, delay);
+                thread::sleep(Duration::from_millis(delay));
+            }
+            if let Some(plugin) = plugin_registry.get_mut(&step.run) {
                 let sig = plugin.io_signature();
                 input_type = Some(sig.input_type.clone());
                 output_type = Some(sig.output_type.clone());
                 let input = build_plugin_input(&params);
+                let now = chrono::Utc::now();
+                println!("STEP {}: init at {}", step.run, now);
+                if let Err(e) = plugin.init(PluginConfig { parameters: HashMap::new(), verbose: false }) {
+                    println!("STEP {}: init error: {:?}", step.run, e);
+                }
+                let now = chrono::Utc::now();
+                println!("STEP {}: pre_execute at {}", step.run, now);
+                if let Err(e) = plugin.pre_execute() {
+                    println!("STEP {}: pre_execute error: {:?}", step.run, e);
+                }
                 match plugin.execute(input) {
                     Ok(plugin_output) => {
+                        let now = chrono::Utc::now();
+                        println!("STEP {}: post_execute at {}", step.run, now);
+                        if let Err(e) = plugin.post_execute() {
+                            println!("STEP {}: post_execute error: {:?}", step.run, e);
+                        }
                         let out_str = format!("{:?}", plugin_output);
                         output = Some(out_str.clone());
-                        outputs.insert(node_id.clone(), out_str);
+                        outputs.insert(node_id.clone(), out_str.clone());
                         last_err = None;
+                        let now = chrono::Utc::now();
+                        println!("STEP {}: shutdown at {}", step.run, now);
+                        if let Err(e) = plugin.shutdown() {
+                            println!("STEP {}: shutdown error: {:?}", step.run, e);
+                        }
+                        // Save to cache if cache_key is set
+                        if let Some(ref path) = cache_path {
+                            std::fs::write(path, serde_json::to_string(&out_str).unwrap_or_default()).ok();
+                            println!("STEP {}: cache saved to {}", step.run, path);
+                            cache_status = Some("saved".to_string());
+                        }
                         break;
                     }
                     Err(e) => {
                         last_err = Some(format!("Plugin error: {:?}", e));
+                        println!("STEP {}: error on attempt {}: {:?}", step.run, try_num, e);
+                        let now = chrono::Utc::now();
+                        println!("STEP {}: post_execute at {}", step.run, now);
+                        if let Err(e) = plugin.post_execute() {
+                            println!("STEP {}: post_execute error: {:?}", step.run, e);
+                        }
+                        let now = chrono::Utc::now();
+                        println!("STEP {}: shutdown at {}", step.run, now);
+                        if let Err(e) = plugin.shutdown() {
+                            println!("STEP {}: shutdown error: {:?}", step.run, e);
+                        }
                         if try_num == retries {
                             break;
                         }
@@ -237,12 +315,19 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
                 match run_model_runner(&step.run, params.clone()) {
                     Ok(out) => {
                         output = Some(out.clone());
-                        outputs.insert(node_id.clone(), out);
+                        outputs.insert(node_id.clone(), out.clone());
                         last_err = None;
+                        // Save to cache if cache_key is set
+                        if let Some(ref path) = cache_path {
+                            std::fs::write(path, serde_json::to_string(&out).unwrap_or_default()).ok();
+                            println!("STEP {}: cache saved to {}", step.run, path);
+                            cache_status = Some("saved".to_string());
+                        }
                         break;
                     }
                     Err(e) => {
                         last_err = Some(e.clone());
+                        println!("STEP {}: error on attempt {}: {}", step.run, try_num, e);
                         if try_num == retries {
                             break;
                         }
@@ -260,7 +345,7 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
             attempt,
             input_type,
             output_type,
-            validation,
+            validation: cache_status.clone(),
         });
         if last_err.is_some() {
             break;

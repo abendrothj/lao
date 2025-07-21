@@ -1,7 +1,6 @@
 use clap::{Parser, Subcommand};
 use lao_orchestrator_core::{run_workflow_yaml, load_workflow_yaml};
 use lao_orchestrator_core::plugins::PluginRegistry;
-use std::env;
 
 #[derive(Parser)]
 #[command(name = "lao")]
@@ -25,6 +24,10 @@ enum Commands {
     },
     /// List available plugins
     PluginList,
+    /// Scaffold a new workflow YAML template
+    NewWorkflow {
+        name: String,
+    },
 }
 
 fn main() {
@@ -99,6 +102,16 @@ fn main() {
                 let sig = plugin.io_signature();
                 println!("- {}: {}\n    Input: {:?}\n    Output: {:?}", name, sig.description, sig.input_type, sig.output_type);
             }
+        }
+        Commands::NewWorkflow { name } => {
+            let path = format!("workflows/{}.yaml", name);
+            let template = format!(
+                "workflow: \"{}\"\nsteps:\n  - run: Whisper\n    input: audio.wav\n    retry_count: 2\n    retry_delay: 1000\n    cache_key: \"whisper_{}\"\n  - run: Ollama\n    input_from: Whisper\n    cache_key: \"summary_{}\"\n",
+                name, name, name
+            );
+            std::fs::create_dir_all("workflows").ok();
+            std::fs::write(&path, template).expect("Failed to write workflow file");
+            println!("Scaffolded new workflow at {}", path);
         }
     }
 } 

@@ -1,0 +1,17 @@
+[package]
+name = "lao-cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["LAO Contributors"]
+description = "Dedicated CLI for LAO Orchestrator"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+lao-orchestrator-core = { path = "../core" } 
+
+[[bin]]
+name = "lao-cli"
+path = "main.rs" 
