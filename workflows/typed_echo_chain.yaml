@@ -1,0 +1,6 @@
+workflow: "Typed Echo Chain"
+steps:
+  - run: Echo
+    input: "Hello, LAO!"
+  - run: Echo
+    input_from: step1 

@@ -1,0 +1,40 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Rust
+/core/target/
+**/target/
+Cargo.lock
+
+# Node/Svelte
+/ui/lao-ui/node_modules/
+/ui/lao-ui/.svelte-kit/
+/ui/lao-ui/build/
+/ui/lao-ui/package/
+
+# Tauri
+/ui/lao-ui/src-tauri/target/
+/ui/lao-ui/src-tauri/Cargo.lock
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Misc
+*.log
+
+# Vite/SvelteKit
+/ui/lao-ui/vite.config.js.timestamp-*
+/ui/lao-ui/vite.config.ts.timestamp-* 

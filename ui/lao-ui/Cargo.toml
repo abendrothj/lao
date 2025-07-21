@@ -1,0 +1,2 @@
+lao-orchestrator-core = { path = "../../../core" }
+serde_yaml = "0.9" 

@@ -21,6 +21,9 @@
       "csp": null
     }
   },
+  "rust": {
+    "src": "../../../core"
+  },
   "bundle": {
     "active": true,
     "targets": "all",

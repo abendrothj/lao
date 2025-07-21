@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    lao_ui_lib::run()
+    lao_orchestrator_core::run()
 }
