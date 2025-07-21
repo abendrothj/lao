@@ -6,13 +6,13 @@
 - Cache hits/misses/saves are logged
 - All logs are tagged with step name and status
 
-## Step Status
-- `pending`: Not started
-- `completed`: Ran successfully
-- `failed`: Error after all retries
-- `cache`: Output loaded from cache
+## Prompt Validation & Test Harness
+- Use the CLI or test harness to validate prompt-to-workflow generation
+- Structure-aware matcher compares generated and expected DAGs
+- Logs diffs, highlights failures, suggests corrections
 
-## Debugging Tips
+## Debugging Agentic Workflows
 - Use `--dry-run` to simulate execution and check types
-- Check logs for error traces and retry history
-- Use `validate` to check plugin availability and workflow structure 
+- Use `validate-prompts` to test prompt/LLM output
+- Check logs for error traces, retry history, and plugin chain issues
+- (Planned) Step-level debug and explainability features 

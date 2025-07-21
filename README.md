@@ -12,23 +12,27 @@
 
 ## 🧠 What is LAO?
 
-LAO is a cross-platform desktop tool built for developers who want to **chain local AI models together** like whispering agents in a secure lab. Run audio transcription, summarization, tagging, and refactoring—all without sending a single byte to the cloud.
-
-A DAG engine for workflows.  
-A plugin system for community-powered agents.  
-An orchestration layer for your offline AI stack.
-
-If Zapier and Node-RED had a hacker baby powered by Ollama and Whisper.cpp, LAO is that child. And it’s ready to grow.
+LAO is a cross-platform desktop tool for chaining local AI models and plugins into powerful, agentic workflows. It supports prompt-driven orchestration, visual DAG editing, and full offline execution.
 
 ---
 
-## ✨ Key Capabilities
+## ✨ Features
 
-- 🧩 **Modular Plugins** – Drop in local runners like Whisper, Mistral, or custom tasks. Build your own tools as composable agents.
-- 📊 **Offline DAG Execution** – Chain tasks with full dependency ordering, retries, and validation. Works like a brain.
-- 🎛️ **Hybrid CLI + GUI** – Tauri-powered visual flow builder + typed YAML workflows.
-- 🔒 **Local-First Forever** – Your data stays yours. LAO never phones home unless you tell it to.
-- 💻 **Dev-Loved Stack** – Rust backend + Svelte UI. Born fast, stays lean.
+- [x] Modular plugin system (Rust, local-first)
+- [x] Offline DAG engine (retries, caching, lifecycle hooks)
+- [x] Prompt-driven agentic workflows (LLM-powered, system prompt file)
+- [x] Visual workflow builder (UI, YAML export, node/edge display)
+- [x] CLI (run, validate, prompt, validate-prompts, plugin list)
+- [x] Prompt library (Markdown + JSON, for validation/fine-tuning)
+- [x] Test harness for prompt validation
+- [ ] End-to-end “Run” from UI (execute and show logs/results)
+- [ ] Node/edge editing in UI (drag, connect, edit)
+- [ ] Plugin explainability (`lao explain plugin <name>`)
+- [ ] Conditional/branching steps
+- [ ] Plugin marketplace/discovery
+- [ ] Live workflow status/logs in UI
+- [ ] Multi-modal input (files, voice, etc.)
+- [ ] Installer/distribution polish
 
 ---
 
@@ -36,120 +40,54 @@ If Zapier and Node-RED had a hacker baby powered by Ollama and Whisper.cpp, LAO 
 
 ```sh
 # Set up the UI
-cd src/ui/lao-ui
+cd ui/lao-ui
 npm install
-
-# Run the desktop app
 npm run tauri dev
 
-# Run the backend with a sample workflow
-cd src/core
-cargo run --bin test_runner -- ../../workflows/test.yaml
+# Run the CLI
+cargo run --bin lao-cli run workflows/test.yaml
+cargo run --bin lao-cli prompt "Summarize this audio and tag action items"
+cargo run --bin lao-cli validate-prompts
 ```
 
-Bring your own `.wav` files, plugin folders, and YAML workflows—and LAO will chain them together like clockwork.
-
 ---
 
-## 🧭 Project Structure
+## 🧩 Prompt-Driven Workflows
 
-```
-lao-orchestrator/
-├── core/            # Rust DAG engine
-├── plugins/         # Custom AI runners
-├── ui/              # Tauri + Svelte desktop builder
-├── cli/             # CLI tools (coming soon)
-├── workflows/       # Typed YAML execution templates
-├── docs/            # Architecture + plugin API
-├── .cursor/         # Task specs and dev automation
-└── README.md
+LAO can generate and execute workflows from natural language prompts using a local LLM (Ollama). The system prompt is editable at `core/prompt_dispatcher/prompt/system_prompt.txt`.
+
+Example:
+```bash
+lao prompt "Refactor this Python file and add comments"
 ```
 
-This repo breathes orchestration. Step into any folder and build.
+---
+
+## 📚 Prompt Library & Validation
+
+- Prompts and expected workflows: `core/prompt_dispatcher/prompt/prompt_library.md` and `.json`
+- Validate with: `cargo run --bin lao-cli validate-prompts`
+- Add new prompts to improve LLM output and test new plugins
 
 ---
 
-## 🔌 Plugins
-
-LAO plugins are modular units of intelligence. You can build one in Rust, declare it with a manifest, and invoke it like an agent.
-
-```rust
-pub trait LaoPlugin {
-  fn name(&self) -> &'static str;
-  fn init(&mut self, config: PluginConfig) -> Result<(), LaoError>;
-  fn execute(&self, input: PluginInput) -> Result<PluginOutput, LaoError>;
-  fn io_signature(&self) -> IOSignature;
-  fn shutdown(&mut self) -> Result<(), LaoError>;
-}
-```
-
-Each plugin declares its input/output types, logs its execution, and runs in a sandbox of your choosing. No APIs required.
+## 🛠️ Contributing Plugins & Prompts
+- Add new plugins by implementing the `LaoPlugin` trait and registering in the registry
+- Add prompt/workflow pairs to the prompt library for validation and LLM tuning
+- See `docs/plugins.md` and `docs/workflows.md` for details
 
 ---
 
-## 🧪 Workflow Example (Typed, Chained)
-
-```yaml
-workflow: "Summarize Meeting"
-steps:
-  - run: Whisper
-    input: "meeting.wav"
-  - run: Summarizer
-    input_from: Whisper
-  - run: Tagger
-    input_from: Summarizer
-```
-
-This pipeline turns voice into structured insight. And it runs entirely offline. Welcome to the future.
-
----
-
-## 🧙‍♂️ Why LAO Exists
-
-Developers deserve tools that **respect their data**, **run at local speed**, and **don’t lock them into SaaS pricing**. LAO is a new category:
-
-- 🔧 **Local Agent Orchestration**
-- 🤖 **Offline AI Task Chaining**
-- 💡 **Composable Intelligence Toolkit**
-
-Built by devs, for devs—with room to customize everything. We don’t chase trends. We forge foundations.
-
----
-
-## 🙌 Get Involved
-
-- 🚀 Fork it. Hack it. Shape it.
-- 🧱 Submit plugins, runners, templates.
-- 💬 Join the LAO dev conversation.
-- 🛠️ Use Cursor, Continue, or your favorite IDE—we’re multi-agent ready.
-
----
-
-## 📄 License
-
-MIT — feel free to fork, remix, and build amazing things. See [`LICENSE`](./LICENSE).
-
-
----
-
-## 💬 Questions?
-
-> Is LAO cross-platform?  
-Yes—macOS, Linux, Windows. Built on Tauri.
-
-> Does it work offline?  
-Absolutely. That’s the point.
-
-> What models are supported?  
-Whisper.cpp, Ollama, LM Studio, GGUF—and more to come.
-
-> How do I contribute?  
-Fork. Build. PR. The future of local AI tooling needs you.
+## 📄 Documentation
+- Architecture: `docs/architecture.md`
+- Plugins: `docs/plugins.md`
+- Workflows: `docs/workflows.md`
+- CLI: `docs/cli.md`
+- Observability: `docs/observability.md`
 
 ---
 
 ## 🌌 Manifesto
-
 Cloud is optional. Intelligence is modular. Agents are composable.  
 LAO is how devs build AI workflows with total control.  
 **No tokens. No latency. No lock-in.**

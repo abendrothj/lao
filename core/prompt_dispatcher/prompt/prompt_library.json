@@ -1,0 +1,18 @@
+[
+  {
+    "prompt": "Summarize this Markdown doc and extract key ideas",
+    "workflow": "workflow: \"Markdown Summary\"\nsteps:\n  - run: MarkdownSummarizer\n    input: \"doc.md\"\n  - run: Tagger\n    input_from: MarkdownSummarizer"
+  },
+  {
+    "prompt": "Audit this config file for security risks",
+    "workflow": "workflow: \"Config Audit\"\nsteps:\n  - run: ConfigParser\n    input: \"config.yaml\"\n  - run: SecurityAuditor\n    input_from: ConfigParser\n  - run: Reporter\n    input_from: SecurityAuditor"
+  },
+  {
+    "prompt": "Refactor this Rust file and add comments",
+    "workflow": "workflow: \"Rust Refactor\"\nsteps:\n  - run: RustRefactor\n    input: \"main.rs\"\n  - run: CommentGenerator\n    input_from: RustRefactor"
+  },
+  {
+    "prompt": "Summarize this audio and create a todo list",
+    "workflow": "workflow: \"Audio Todo\"\nsteps:\n  - run: Whisper\n    input: \"meeting.wav\"\n  - run: Summarizer\n    input_from: Whisper\n  - run: TaskExtractor\n    input_from: Summarizer"
+  }
+] 

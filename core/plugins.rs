@@ -207,6 +207,48 @@ impl LaoPlugin for GGUFPlugin {
     fn shutdown(&mut self) -> Result<(), LaoError> { Ok(()) }
 }
 
+// --- Prompt Dispatcher Plugin ---
+pub struct PromptDispatcherPlugin;
+
+impl LaoPlugin for PromptDispatcherPlugin {
+    fn name(&self) -> &'static str { "PromptDispatcher" }
+    fn init(&mut self, _config: PluginConfig) -> Result<(), LaoError> { Ok(()) }
+    fn pre_execute(&mut self) -> Result<(), LaoError> { Ok(()) }
+    fn execute(&self, input: PluginInput) -> Result<PluginOutput, LaoError> {
+        use std::env;
+        use std::fs;
+        let prompt_path = env::var("PROMPT_PATH").unwrap_or_else(|_| "core/prompt_dispatcher/prompt/system_prompt.txt".to_string());
+        let system_prompt = fs::read_to_string(&prompt_path)
+            .map_err(|e| LaoError::ExecutionError(format!("Failed to read system prompt file {}: {}", prompt_path, e)))?;
+        match input {
+            PluginInput::Text(prompt) => {
+                let full_prompt = format!("{}\n{}", system_prompt, prompt);
+                let output = std::process::Command::new("ollama")
+                    .arg("run")
+                    .arg("mistral")
+                    .arg(&full_prompt)
+                    .output()
+                    .map_err(|e| LaoError::ExecutionError(format!("Failed to run ollama: {}", e)))?;
+                if !output.status.success() {
+                    return Err(LaoError::ExecutionError(format!("ollama failed: {}", String::from_utf8_lossy(&output.stderr))));
+                }
+                let out_str = String::from_utf8_lossy(&output.stdout).to_string();
+                Ok(PluginOutput::Text(out_str))
+            }
+            _ => Err(LaoError::ExecutionError("PromptDispatcher only supports Text input".into())),
+        }
+    }
+    fn post_execute(&mut self) -> Result<(), LaoError> { Ok(()) }
+    fn io_signature(&self) -> IOSignature {
+        IOSignature {
+            input_type: PluginInputType::Text,
+            output_type: PluginInputType::Text,
+            description: "Generate a workflow plan from a prompt using a local LLM (Ollama)".into(),
+        }
+    }
+    fn shutdown(&mut self) -> Result<(), LaoError> { Ok(()) }
+}
+
 pub struct PluginRegistry {
     pub plugins: HashMap<String, Box<dyn LaoPlugin>>,
 }
@@ -231,6 +273,7 @@ impl PluginRegistry {
         reg.register(OllamaPlugin);
         reg.register(LMStudioPlugin);
         reg.register(GGUFPlugin);
+        reg.register(PromptDispatcherPlugin);
         reg
     }
 } 

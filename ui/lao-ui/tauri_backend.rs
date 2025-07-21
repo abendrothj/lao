@@ -68,10 +68,21 @@ fn get_workflow_graph(path: &str) -> Result<WorkflowGraph, String> {
     Ok(WorkflowGraph { nodes, edges })
 }
 
+#[tauri::command]
+fn dispatch_prompt(prompt: String) -> Result<String, String> {
+    let mut registry = lao_orchestrator_core::plugins::PluginRegistry::default_registry();
+    let dispatcher = registry.get_mut("PromptDispatcher").ok_or("PromptDispatcherPlugin not found")?;
+    match dispatcher.execute(lao_orchestrator_core::plugins::PluginInput::Text(prompt)) {
+        Ok(lao_orchestrator_core::plugins::PluginOutput::Text(yaml)) => Ok(yaml),
+        Ok(_) => Err("PromptDispatcher did not return YAML text".to_string()),
+        Err(e) => Err(format!("PromptDispatcher failed: {:?}", e)),
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, tauri_load_workflow_yaml, tauri_run_model_runner, tauri_run_workflow_yaml, get_workflow_graph])
+        .invoke_handler(tauri::generate_handler![greet, tauri_load_workflow_yaml, tauri_run_model_runner, tauri_run_workflow_yaml, get_workflow_graph, dispatch_prompt])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 } 

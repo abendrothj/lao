@@ -4,8 +4,21 @@
 
 - **DAG Engine**: Executes workflows as directed acyclic graphs, handling step dependencies, retries, caching, and lifecycle hooks.
 - **Plugin System**: Modular Rust trait-based plugins for local AI tasks (Whisper, LLMs, custom agents). Plugins declare IO types and lifecycle hooks.
-- **CLI**: Command-line interface for running, validating, and inspecting workflows and plugins. Supports dry-run, retries, and caching.
-- **UI (Tauri + Svelte)**: Visual flow builder and execution monitor, communicating with the backend via Tauri bridge.
+- **PromptDispatcherPlugin**: Uses a local LLM (Ollama) and a system prompt file to generate workflows from natural language prompts. Hot-swappable prompt at `core/prompt_dispatcher/prompt/system_prompt.txt`.
+- **Prompt Library & Validation**: Prompts and expected workflows in Markdown/JSON, validated by a test harness and CLI command.
+- **CLI**: Command-line interface for running, validating, and inspecting workflows and plugins. Supports prompt-driven execution and validation.
+- **UI (Tauri + Svelte)**: Visual flow builder, prompt input, and execution monitor, communicating with the backend via Tauri bridge.
+
+## Agentic Workflow Generation
+- User enters a prompt (CLI or UI)
+- PromptDispatcherPlugin uses LLM + system prompt to generate YAML workflow
+- Workflow is parsed, visualized, and executed as a DAG
+
+## Prompt Validation/Test Harness
+- Loads prompt library
+- Runs each prompt through the dispatcher
+- Compares generated workflow to expected output (structure-aware)
+- CLI and test harness for validation
 
 ## Data Flow
 

@@ -12,6 +12,12 @@
   let newNodeType = $state("Echo");
   let yamlExport = $state("");
 
+  // Prompt-driven workflow state
+  let prompt = $state("");
+  let generatedYaml = $state("");
+  let genError = $state("");
+  let genGraph = $state(null);
+
   async function greet(event) {
     event.preventDefault();
     greetMsg = await invoke("greet", { name });
@@ -55,29 +61,71 @@ steps:
     }
     yamlExport = yaml;
   }
+
+  async function generateWorkflowFromPrompt() {
+    genError = "";
+    generatedYaml = "";
+    genGraph = null;
+    if (!prompt.trim()) {
+      genError = "Please enter a prompt.";
+      return;
+    }
+    try {
+      const yaml = await invoke("dispatch_prompt", { prompt });
+      generatedYaml = yaml;
+      // Parse YAML to graph for visualization
+      // Save YAML to a temp file and load as graph
+      // For now, call get_workflow_graph with a temp file
+      const tempPath = "workflows/generated_from_prompt.yaml";
+      await window.__TAURI__.fs.createDir("workflows", { recursive: true });
+      await window.__TAURI__.fs.writeFile({ path: tempPath, contents: yaml });
+      genGraph = await invoke("get_workflow_graph", { path: tempPath });
+    } catch (e) {
+      genError = e.message || e;
+    }
+  }
 </script>
 
 <main class="container">
-  <h1>Welcome to Tauri + Svelte</h1>
-
-  <div class="row">
-    <a href="https://vitejs.dev" target="_blank">
-      <img src="/vite.svg" class="logo vite" alt="Vite Logo" />
-    </a>
-    <a href="https://tauri.app" target="_blank">
-      <img src="/tauri.svg" class="logo tauri" alt="Tauri Logo" />
-    </a>
-    <a href="https://kit.svelte.dev" target="_blank">
-      <img src="/svelte.svg" class="logo svelte-kit" alt="SvelteKit Logo" />
-    </a>
-  </div>
-  <p>Click on the Tauri, Vite, and SvelteKit logos to learn more.</p>
-
+  <img src="/logo-full.png" alt="LAO Logo" class="lao-logo" />
   <form class="row" onsubmit={greet}>
     <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
     <button type="submit">Greet</button>
   </form>
   <p>{greetMsg}</p>
+
+  <section style="margin-top: 2em;">
+    <h2>Prompt-Driven Workflow</h2>
+    <input placeholder="Describe your workflow (e.g. 'Summarize this audio and tag action items')" bind:value={prompt} style="width: 60%;" />
+    <button onclick={generateWorkflowFromPrompt}>Generate Workflow</button>
+    {#if genError}
+      <p style="color: red;">{genError}</p>
+    {/if}
+    {#if generatedYaml}
+      <h3>Generated Workflow YAML</h3>
+      <pre>{generatedYaml}</pre>
+    {/if}
+    {#if genGraph}
+      <h3>Visualized Workflow</h3>
+      <div class="graph-vis">
+        <div class="nodes">
+          {#each genGraph.nodes as node}
+            <div class="node-card">
+              <b>{node.id}</b>: {node.run} (<i>{node.status}</i>)
+            </div>
+          {/each}
+        </div>
+        <div class="edges">
+          <h4>Edges</h4>
+          <ul>
+            {#each genGraph.edges as edge}
+              <li>{edge.from} → {edge.to}</li>
+            {/each}
+          </ul>
+        </div>
+      </div>
+    {/if}
+  </section>
 
   <section style="margin-top: 2em;">
     <h2>Visual Flow Builder</h2>
@@ -121,6 +169,42 @@ steps:
 </main>
 
 <style>
+.lao-logo {
+  display: block;
+  margin: 0 auto 2em auto;
+  max-width: 300px;
+  height: auto;
+}
+.graph-vis {
+  display: flex;
+  flex-direction: row;
+  gap: 2em;
+  margin-top: 1em;
+  justify-content: center;
+}
+.nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+}
+.node-card {
+  background: #222;
+  color: #fff;
+  border-radius: 8px;
+  padding: 1em 2em;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  min-width: 180px;
+  text-align: left;
+}
+.edges ul {
+  list-style: none;
+  padding: 0;
+}
+.edges li {
+  color: #aaa;
+  font-size: 1em;
+}
+
 .logo.vite:hover {
   filter: drop-shadow(0 0 2em #747bff);
 }

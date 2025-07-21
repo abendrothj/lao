@@ -18,14 +18,26 @@ steps:
     input_from: Summarizer
 ```
 
-## Step Fields
-- `run`: Plugin name
-- `input`/`input_from`: Direct input or dependency
-- `retry_count`, `retry_delay`: Retry config (ms)
-- `cache_key`: Enable output caching
-- `depends_on`: List of step names this step depends on
+## Prompt-Generated Workflows
+- Use the CLI or UI to generate workflows from natural language prompts
+- Example:
+  ```bash
+  lao prompt "Refactor this Rust file and add comments"
+  ```
+  Output:
+  ```yaml
+  workflow: "Rust Refactor"
+  steps:
+    - run: RustRefactor
+      input: "main.rs"
+    - run: CommentGenerator
+      input_from: RustRefactor
+  ```
 
-## Advanced Features
-- **Retries**: Steps can retry on failure with exponential backoff.
-- **Caching**: Steps with `cache_key` will skip execution if cached output exists.
-- **Lifecycle Hooks**: Plugins can run custom logic before/after execution. 
+## Advanced Features (Planned)
+- **Conditional/Branching Steps**: if/else, loops, parameterized flows
+- **Parameter Injection**: Securely pass secrets, user data, etc.
+- **Multi-modal Input**: Files, voice, etc.
+
+## Contributing Workflows
+- Add new prompt/workflow pairs to the prompt library for validation and LLM tuning 
