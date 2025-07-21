@@ -21,6 +21,7 @@ serde_yaml = "0.9"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 libloading = "0.8"
+lao_plugin_api = { path = "../lao_plugin_api" }
 
 [[bin]]
 name = "test_runner"

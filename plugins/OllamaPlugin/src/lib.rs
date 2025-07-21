@@ -1,29 +1,51 @@
-use lao_plugin_api::{Plugin, PluginInput, PluginOutput};
+use lao_plugin_api::{PluginInput, PluginOutput, PluginVTable, PluginVTablePtr};
+use std::ffi::{CStr, CString};
 use std::process::Command;
+use std::os::raw::c_char;
 
-pub struct OllamaPlugin;
+unsafe extern "C" fn name() -> *const c_char {
+    b"OllamaPlugin\0".as_ptr() as *const c_char
+}
 
-impl Plugin for OllamaPlugin {
-    fn run(&self, input: PluginInput) -> Result<PluginOutput, String> {
-        let prompt = input.text.ok_or("Missing text input")?;
-        let output = Command::new("ollama")
-            .arg("run")
-            .arg("mistral")
-            .arg(&prompt)
-            .output()
-            .map_err(|e| format!("Failed to run ollama: {}", e))?;
-        if !output.status.success() {
-            return Err(format!("ollama failed: {}", String::from_utf8_lossy(&output.stderr)));
+unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
+    if input.is_null() {
+        return PluginOutput { text: std::ptr::null_mut() };
+    }
+    let c_str = CStr::from_ptr((*input).text);
+    let prompt = c_str.to_string_lossy();
+    let output = Command::new("ollama")
+        .arg("run")
+        .arg("mistral")
+        .arg(&*prompt)
+        .output();
+    let text = match output {
+        Ok(out) if out.status.success() => {
+            CString::new(String::from_utf8_lossy(&out.stdout).to_string()).unwrap().into_raw()
+        },
+        Ok(out) => {
+            CString::new(format!("ollama failed: {}", String::from_utf8_lossy(&out.stderr))).unwrap().into_raw()
+        },
+        Err(e) => {
+            CString::new(format!("Failed to run ollama: {}", e)).unwrap().into_raw()
         }
-        let out_str = String::from_utf8_lossy(&output.stdout).to_string();
-        Ok(PluginOutput {
-            text: Some(out_str),
-            ..Default::default()
-        })
+    };
+    PluginOutput { text }
+}
+
+unsafe extern "C" fn free_output(output: PluginOutput) {
+    if !output.text.is_null() {
+        let _ = CString::from_raw(output.text);
     }
 }
 
 #[no_mangle]
-pub extern "C" fn plugin_entry_point() -> *mut dyn LaoPlugin {
-    Box::into_raw(Box::new(OllamaPlugin))
+pub static PLUGIN_VTABLE: PluginVTable = PluginVTable {
+    name,
+    run,
+    free_output,
+};
+
+#[no_mangle]
+pub extern "C" fn plugin_vtable() -> PluginVTablePtr {
+    &PLUGIN_VTABLE
 } 

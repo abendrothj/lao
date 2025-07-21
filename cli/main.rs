@@ -1,6 +1,27 @@
 use clap::{Parser, Subcommand};
 use lao_orchestrator_core::{run_workflow_yaml, load_workflow_yaml};
 use lao_orchestrator_core::plugins::PluginRegistry;
+use lao_plugin_api::PluginInput;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct PromptPair {
+    prompt: String,
+    workflow: String,
+}
+
+fn normalize_yaml(yaml: &str) -> serde_yaml::Value {
+    serde_yaml::from_str(yaml).unwrap_or(serde_yaml::Value::Null)
+}
+
+fn strip_code_fences(s: &str) -> String {
+    s.lines()
+        .filter(|line| !line.trim_start().starts_with("```") )
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
 
 #[derive(Parser)]
 #[command(name = "lao")]
@@ -57,15 +78,6 @@ enum Commands {
     },
 }
 
-fn strip_code_fences(s: &str) -> String {
-    s.lines()
-        .filter(|line| !line.trim_start().starts_with("```") )
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string()
-}
-
 fn main() {
     let cli = Cli::parse();
     match cli.command {
@@ -73,16 +85,14 @@ fn main() {
             if dry_run {
                 match load_workflow_yaml(&path) {
                     Ok(workflow) => {
-                        let plugin_registry = PluginRegistry::default_registry();
+                        let plugin_registry = PluginRegistry::dynamic_registry("plugins/");
                         println!("[DRY RUN] Workflow: {}", workflow.workflow);
                         for (i, step) in workflow.steps.iter().enumerate() {
-                            let plugin = plugin_registry.get(&step.run);
+                            let plugin = plugin_registry.plugins.get(&step.run);
                             println!("Step {}: {}", i + 1, step.run);
                             match plugin {
-                                Some(p) => {
-                                    let sig = p.io_signature();
-                                    println!("  Input: {:?}", sig.input_type);
-                                    println!("  Output: {:?}", sig.output_type);
+                                Some(_p) => {
+                                    println!("  [OK] Plugin '{}' loaded.", step.run);
                                 }
                                 None => {
                                     println!("  [ERROR] Plugin '{}' not found!", step.run);
@@ -113,7 +123,7 @@ fn main() {
         Commands::Validate { path } => {
             match load_workflow_yaml(&path) {
                 Ok(workflow) => {
-                    let plugin_registry = PluginRegistry::default_registry();
+                    let plugin_registry = PluginRegistry::dynamic_registry("plugins/");
                     let dag = lao_orchestrator_core::build_dag(&workflow.steps).unwrap();
                     let errors = lao_orchestrator_core::validate_workflow_types(&dag, &plugin_registry);
                     if errors.is_empty() {
@@ -132,11 +142,10 @@ fn main() {
             }
         }
         Commands::PluginList => {
-            let plugin_registry = PluginRegistry::default_registry();
+            let plugin_registry = PluginRegistry::dynamic_registry("plugins/");
             println!("Available plugins:");
-            for (name, plugin) in &plugin_registry.plugins {
-                let sig = plugin.io_signature();
-                println!("- {}: {}\n    Input: {:?}\n    Output: {:?}", name, sig.description, sig.input_type, sig.output_type);
+            for (name, _plugin) in &plugin_registry.plugins {
+                println!("- {}", name);
             }
         }
         Commands::NewWorkflow { name, output } => {
@@ -159,92 +168,76 @@ fn main() {
         }
         Commands::Prompt { prompt, output } => {
             // Use the PromptDispatcherPlugin to generate a workflow YAML
-            let mut registry = PluginRegistry::default_registry();
-            let dispatcher = registry.get_mut("PromptDispatcher").expect("PromptDispatcherPlugin not found");
-            let result = dispatcher.execute(lao_orchestrator_core::plugins::PluginInput::Text(prompt));
-            match result {
-                Ok(lao_orchestrator_core::plugins::PluginOutput::Text(yaml)) => {
-                    println!("Generated workflow:\n{}", yaml);
-                    let clean_yaml = strip_code_fences(&yaml);
-                    match serde_yaml::from_str::<lao_orchestrator_core::Workflow>(&clean_yaml) {
-                        Ok(_workflow) => {
-                            let out_path = output.unwrap_or_else(|| "workflows/generated_from_prompt.yaml".to_string());
-                            if let Some(parent) = std::path::Path::new(&out_path).parent() {
-                                if let Err(e) = std::fs::create_dir_all(parent) {
-                                    eprintln!("[ERROR] Failed to create directory {}: {}", parent.display(), e);
-                                    std::process::exit(1);
-                                }
-                            }
-                            if let Err(e) = std::fs::write(&out_path, &clean_yaml) {
-                                eprintln!("[ERROR] Failed to write workflow file {}: {}", out_path, e);
-                                std::process::exit(1);
-                            }
-                            println!("Workflow saved to {}", out_path);
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to parse generated workflow YAML: {}", e);
+            let mut registry = PluginRegistry::dynamic_registry("plugins/");
+            let dispatcher = registry.plugins.get("PromptDispatcher").expect("PromptDispatcherPlugin not found");
+            // Call the run function via the vtable
+            use std::ffi::CString;
+            let c_prompt = CString::new(prompt.clone()).unwrap();
+            let input = PluginInput { text: c_prompt.as_ptr() };
+            let output_obj = unsafe { ((*dispatcher.vtable).run)(&input) };
+            let c_str = unsafe { std::ffi::CStr::from_ptr(output_obj.text) };
+            let yaml = c_str.to_string_lossy().to_string();
+            unsafe { ((*dispatcher.vtable).free_output)(output_obj) };
+            println!("Generated workflow:\n{}", yaml);
+            let clean_yaml = strip_code_fences(&yaml);
+            match serde_yaml::from_str::<lao_orchestrator_core::Workflow>(&clean_yaml) {
+                Ok(_workflow) => {
+                    let out_path = output.unwrap_or_else(|| "workflows/generated_from_prompt.yaml".to_string());
+                    if let Some(parent) = std::path::Path::new(&out_path).parent() {
+                        if let Err(e) = std::fs::create_dir_all(parent) {
+                            eprintln!("[ERROR] Failed to create directory {}: {}", parent.display(), e);
                             std::process::exit(1);
                         }
                     }
-                }
-                Ok(_) => {
-                    eprintln!("PromptDispatcher did not return YAML text");
-                    std::process::exit(1);
+                    if let Err(e) = std::fs::write(&out_path, &clean_yaml) {
+                        eprintln!("[ERROR] Failed to write workflow file {}: {}", out_path, e);
+                        std::process::exit(1);
+                    }
+                    println!("Workflow saved to {}", out_path);
                 }
                 Err(e) => {
-                    eprintln!("PromptDispatcher failed: {:?}", e);
+                    eprintln!("Failed to parse generated workflow YAML: {}", e);
                     std::process::exit(1);
                 }
             }
         }
         Commands::ValidatePrompts { path, fail_fast, verbose } => {
-            use serde::Deserialize;
-            use std::fs;
-            #[derive(Deserialize)]
-            struct PromptPair { prompt: String, workflow: String }
-            fn normalize_yaml(yaml: &str) -> serde_yaml::Value {
-                serde_yaml::from_str(yaml).unwrap_or(serde_yaml::Value::Null)
-            }
-            let data = fs::read_to_string(&path).expect("Failed to read prompt_library.json");
-            let pairs: Vec<PromptPair> = serde_json::from_str(&data).expect("Failed to parse prompt_library.json");
-            let mut registry = PluginRegistry::default_registry();
-            let dispatcher = registry.get_mut("PromptDispatcher").expect("PromptDispatcherPlugin not found");
-            let mut passed = 0;
-            let mut failed = 0;
-            for (i, pair) in pairs.iter().enumerate() {
-                println!("\nTest {}: {}", i + 1, pair.prompt);
-                let result = dispatcher.execute(lao_orchestrator_core::plugins::PluginInput::Text(pair.prompt.clone()));
-                match result {
-                    Ok(lao_orchestrator_core::plugins::PluginOutput::Text(generated)) => {
-                        let expected_norm = normalize_yaml(&pair.workflow);
-                        let generated_norm = normalize_yaml(&generated);
-                        if expected_norm == generated_norm {
-                            if verbose { println!("  ✅ PASS"); }
-                            passed += 1;
-                        } else {
-                            println!("  ❌ FAIL");
-                            if verbose || !fail_fast {
-                                println!("  Expected:\n{}", pair.workflow);
-                                println!("  Got:\n{}", generated);
-                            }
-                            failed += 1;
-                            if fail_fast { break; }
-                        }
+            // Load prompt pairs from the prompt library JSON
+            let prompt_pairs: Vec<PromptPair> = {
+                let data = std::fs::read_to_string(&path).expect("Failed to read prompt library");
+                serde_json::from_str(&data).expect("Failed to parse prompt library JSON")
+            };
+            let mut registry = PluginRegistry::dynamic_registry("plugins/");
+            let dispatcher = registry.plugins.get("PromptDispatcher").expect("PromptDispatcherPlugin not found");
+            let mut failures = 0;
+            for (i, pair) in prompt_pairs.iter().enumerate() {
+                use std::ffi::CString;
+                let c_prompt = CString::new(pair.prompt.clone()).unwrap();
+                let input = PluginInput { text: c_prompt.as_ptr() };
+                let output_obj = unsafe { ((*dispatcher.vtable).run)(&input) };
+                let c_str = unsafe { std::ffi::CStr::from_ptr(output_obj.text) };
+                let generated = c_str.to_string_lossy().to_string();
+                unsafe { ((*dispatcher.vtable).free_output)(output_obj) };
+                let expected = normalize_yaml(&pair.workflow);
+                let actual = normalize_yaml(&generated);
+                let pass = expected == actual;
+                if !pass {
+                    failures += 1;
+                    println!("[FAIL] Prompt {}: {}\nExpected:\n{}\nActual:\n{}\n", i + 1, pair.prompt, pair.workflow, generated);
+                    if fail_fast {
+                        println!("Fail-fast enabled. Stopping at first failure.");
+                        std::process::exit(1);
                     }
-                    Ok(_) => {
-                        println!("  ❌ FAIL: Dispatcher did not return YAML text");
-                        failed += 1;
-                        if fail_fast { break; }
-                    }
-                    Err(e) => {
-                        println!("  ❌ FAIL: Dispatcher error: {:?}", e);
-                        failed += 1;
-                        if fail_fast { break; }
-                    }
+                } else if verbose {
+                    println!("[PASS] Prompt {}: {}", i + 1, pair.prompt);
                 }
             }
-            println!("\nTest Summary: {} passed, {} failed, {} total", passed, failed, passed + failed);
-            if failed > 0 { std::process::exit(1); }
+            if failures == 0 {
+                println!("All prompts passed validation!");
+            } else {
+                println!("{} prompts failed validation.", failures);
+                std::process::exit(1);
+            }
         }
         Commands::ListWorkflows => {
             let dir = std::path::Path::new("workflows");

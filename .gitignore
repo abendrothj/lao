@@ -25,6 +25,7 @@ Cargo.lock
 # Editor
 .vscode/
 .idea/
+context/
 
 # Logs
 npm-debug.log*

@@ -1,7 +1,6 @@
 use clap::{Parser, Subcommand};
 use lao_orchestrator_core::{run_workflow_yaml, load_workflow_yaml};
 use lao_orchestrator_core::plugins::PluginRegistry;
-use std::env;
 
 #[derive(Parser)]
 #[command(name = "lao")]
@@ -40,10 +39,8 @@ fn main() {
                             let plugin = plugin_registry.get(&step.run);
                             println!("Step {}: {}", i + 1, step.run);
                             match plugin {
-                                Some(p) => {
-                                    let sig = p.io_signature();
-                                    println!("  Input: {:?}", sig.input_type);
-                                    println!("  Output: {:?}", sig.output_type);
+                                Some(_p) => {
+                                    println!("  [OK] Plugin '{}' loaded.", step.run);
                                 }
                                 None => {
                                     println!("  [ERROR] Plugin '{}' not found!", step.run);
@@ -95,9 +92,8 @@ fn main() {
         Commands::PluginList => {
             let plugin_registry = PluginRegistry::dynamic_registry("plugins/");
             println!("Available plugins:");
-            for (name, plugin) in &plugin_registry.plugins {
-                let sig = plugin.io_signature();
-                println!("- {}: {}\n    Input: {:?}\n    Output: {:?}", name, sig.description, sig.input_type, sig.output_type);
+            for (name, _plugin) in &plugin_registry.plugins {
+                println!("- {}", name);
             }
         }
     }

@@ -1,21 +1,23 @@
-use serde::{Serialize, Deserialize};
+use std::os::raw::{c_char};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[repr(C)]
 pub struct PluginInput {
-    pub text: Option<String>,
-    pub audio: Option<String>, // Path to audio file
-    pub json: Option<serde_json::Value>,
-    pub tagged_data: Option<Vec<(String, String)>>,
+    pub text: *const c_char,
+    // Extend as needed
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[repr(C)]
 pub struct PluginOutput {
-    pub text: Option<String>,
-    pub audio: Option<String>,
-    pub json: Option<serde_json::Value>,
-    pub tagged_data: Option<Vec<(String, String)>>,
+    pub text: *mut c_char,
+    // Extend as needed
 }
 
-pub trait Plugin {
-    fn run(&self, input: PluginInput) -> Result<PluginOutput, String>;
-} 
+#[repr(C)]
+pub struct PluginVTable {
+    pub name: unsafe extern "C" fn() -> *const c_char,
+    pub run: unsafe extern "C" fn(input: *const PluginInput) -> PluginOutput,
+    pub free_output: unsafe extern "C" fn(output: PluginOutput),
+    // Add more functions as needed
+}
+
+pub type PluginVTablePtr = *const PluginVTable; 

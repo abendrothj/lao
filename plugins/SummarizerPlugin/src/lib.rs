@@ -1,19 +1,19 @@
-use lao_plugin_api::{Plugin, PluginInput, PluginOutput};
+use lao_plugin_api::{PluginInput, PluginOutput, PluginVTable, PluginVTablePtr};
+use std::ffi::{CStr, CString};
+use reqwest;
+use serde_json;
+use std::os::raw::c_char;
 
-pub struct SummarizerPlugin;
-
-impl Plugin for SummarizerPlugin {
-    fn run(&self, input: PluginInput) -> Result<PluginOutput, String> {
-        let text = input.text.ok_or("Missing text input")?;
-        let summary = ollama_summarize(&text)?;
-        Ok(PluginOutput {
-            text: Some(summary),
-            ..Default::default()
-        })
-    }
+unsafe extern "C" fn name() -> *const c_char {
+    b"SummarizerPlugin\0".as_ptr() as *const c_char
 }
 
-fn ollama_summarize(text: &str) -> Result<String, String> {
+unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
+    if input.is_null() {
+        return PluginOutput { text: std::ptr::null_mut() };
+    }
+    let c_str = CStr::from_ptr((*input).text);
+    let text = c_str.to_string_lossy();
     let client = reqwest::blocking::Client::new();
     let res = client.post("http://localhost:11434/api/generate")
         .json(&serde_json::json!({
@@ -21,23 +21,32 @@ fn ollama_summarize(text: &str) -> Result<String, String> {
             "prompt": format!("Summarize this:\n\n{}", text),
             "stream": false
         }))
-        .send()
-        .map_err(|e| e.to_string())?;
-    let json: serde_json::Value = res.json().map_err(|e| e.to_string())?;
-    Ok(json["response"].as_str().unwrap_or("").to_string())
+        .send();
+    let summary = match res {
+        Ok(resp) => {
+            let json: serde_json::Value = resp.json().unwrap_or_default();
+            json["response"].as_str().unwrap_or("").to_string()
+        },
+        Err(e) => format!("Summarizer error: {}", e),
+    };
+    let out = CString::new(summary).unwrap().into_raw();
+    PluginOutput { text: out }
 }
 
-// Provide a default PluginOutput for convenience
-impl Default for PluginOutput {
-    fn default() -> Self {
-        PluginOutput {
-            text: None,
-            ..Default::default()
-        }
+unsafe extern "C" fn free_output(output: PluginOutput) {
+    if !output.text.is_null() {
+        let _ = CString::from_raw(output.text);
     }
 }
 
 #[no_mangle]
-pub extern "C" fn plugin_entry_point() -> *mut dyn LaoPlugin {
-    Box::into_raw(Box::new(SummarizerPlugin))
+pub static PLUGIN_VTABLE: PluginVTable = PluginVTable {
+    name,
+    run,
+    free_output,
+};
+
+#[no_mangle]
+pub extern "C" fn plugin_vtable() -> PluginVTablePtr {
+    &PLUGIN_VTABLE
 } 
