@@ -1,0 +1,11 @@
+name: EchoPlugin
+version: 0.1.0
+description: Echoes the input as output
+maintainer: LAO Contributors
+tags: [utility, echo]
+input:
+  type: any
+output:
+  type: any
+example_prompts:
+  - "Echo this text" 

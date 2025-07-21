@@ -1,0 +1,13 @@
+[package]
+name = "summarizer_plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Summarizes input text using a local LLM"
+authors = ["LAO Contributors"]
+
+[lib]
+crate-type = ["cdylib"]
+
+dependencies = [
+    { name = "lao_plugin_api", path = "../../lao_plugin_api" }
+] 

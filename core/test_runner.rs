@@ -34,7 +34,7 @@ fn main() {
             if dry_run {
                 match load_workflow_yaml(&path) {
                     Ok(workflow) => {
-                        let plugin_registry = PluginRegistry::default_registry();
+                        let plugin_registry = PluginRegistry::dynamic_registry("plugins/");
                         println!("[DRY RUN] Workflow: {}", workflow.workflow);
                         for (i, step) in workflow.steps.iter().enumerate() {
                             let plugin = plugin_registry.get(&step.run);
@@ -74,7 +74,7 @@ fn main() {
         Commands::Validate { path } => {
             match load_workflow_yaml(&path) {
                 Ok(workflow) => {
-                    let plugin_registry = PluginRegistry::default_registry();
+                    let plugin_registry = PluginRegistry::dynamic_registry("plugins/");
                     let dag = lao_orchestrator_core::build_dag(&workflow.steps).unwrap();
                     let errors = lao_orchestrator_core::validate_workflow_types(&dag, &plugin_registry);
                     if errors.is_empty() {
@@ -93,7 +93,7 @@ fn main() {
             }
         }
         Commands::PluginList => {
-            let plugin_registry = PluginRegistry::default_registry();
+            let plugin_registry = PluginRegistry::dynamic_registry("plugins/");
             println!("Available plugins:");
             for (name, plugin) in &plugin_registry.plugins {
                 let sig = plugin.io_signature();

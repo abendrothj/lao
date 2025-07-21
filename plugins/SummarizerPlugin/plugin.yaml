@@ -1,0 +1,12 @@
+name: SummarizerPlugin
+version: 0.1.0
+description: Summarizes input text using a local LLM
+maintainer: LAO Contributors
+tags: [text, summarization]
+input:
+  type: text
+output:
+  type: text
+example_prompts:
+  - "Summarize this transcript"
+  - "Give me a TL;DR of this article" 

@@ -27,10 +27,14 @@ enum Commands {
     /// Scaffold a new workflow YAML template
     NewWorkflow {
         name: String,
+        #[arg(long, help = "Output file path (default: workflows/<name>.yaml)")]
+        output: Option<String>,
     },
     /// Generate and run a workflow from a prompt
     Prompt {
         prompt: String,
+        #[arg(long, help = "Output file path (default: workflows/generated_from_prompt.yaml)")]
+        output: Option<String>,
     },
     /// Validate prompt-to-workflow generation using the prompt library
     ValidatePrompts {
@@ -41,6 +45,25 @@ enum Commands {
         #[arg(long)]
         verbose: bool,
     },
+    /// List all saved workflows in the workflows/ directory
+    ListWorkflows,
+    /// View a workflow YAML file by name (from workflows/ directory)
+    ViewWorkflow {
+        name: String,
+    },
+    /// Delete a workflow YAML file by name (from workflows/ directory)
+    DeleteWorkflow {
+        name: String,
+    },
+}
+
+fn strip_code_fences(s: &str) -> String {
+    s.lines()
+        .filter(|line| !line.trim_start().starts_with("```") )
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
 }
 
 fn main() {
@@ -116,17 +139,25 @@ fn main() {
                 println!("- {}: {}\n    Input: {:?}\n    Output: {:?}", name, sig.description, sig.input_type, sig.output_type);
             }
         }
-        Commands::NewWorkflow { name } => {
-            let path = format!("workflows/{}.yaml", name);
+        Commands::NewWorkflow { name, output } => {
+            let path = output.unwrap_or_else(|| format!("workflows/{}.yaml", name));
             let template = format!(
                 "workflow: \"{}\"\nsteps:\n  - run: Whisper\n    input: audio.wav\n    retry_count: 2\n    retry_delay: 1000\n    cache_key: \"whisper_{}\"\n  - run: Ollama\n    input_from: Whisper\n    cache_key: \"summary_{}\"\n",
                 name, name, name
             );
-            std::fs::create_dir_all("workflows").ok();
-            std::fs::write(&path, template).expect("Failed to write workflow file");
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    eprintln!("[ERROR] Failed to create directory {}: {}", parent.display(), e);
+                    std::process::exit(1);
+                }
+            }
+            if let Err(e) = std::fs::write(&path, template) {
+                eprintln!("[ERROR] Failed to write workflow file {}: {}", path, e);
+                std::process::exit(1);
+            }
             println!("Scaffolded new workflow at {}", path);
         }
-        Commands::Prompt { prompt } => {
+        Commands::Prompt { prompt, output } => {
             // Use the PromptDispatcherPlugin to generate a workflow YAML
             let mut registry = PluginRegistry::default_registry();
             let dispatcher = registry.get_mut("PromptDispatcher").expect("PromptDispatcherPlugin not found");
@@ -134,25 +165,21 @@ fn main() {
             match result {
                 Ok(lao_orchestrator_core::plugins::PluginOutput::Text(yaml)) => {
                     println!("Generated workflow:\n{}", yaml);
-                    // Parse the YAML into a Workflow struct
-                    match serde_yaml::from_str::<lao_orchestrator_core::Workflow>(&yaml) {
-                        Ok(workflow) => {
-                            // Save to a temp file and run
-                            let temp_path = "workflows/generated_from_prompt.yaml";
-                            std::fs::create_dir_all("workflows").ok();
-                            std::fs::write(temp_path, &yaml).expect("Failed to write workflow file");
-                            match run_workflow_yaml(temp_path) {
-                                Ok(results) => {
-                                    println!("Workflow executed successfully. Step outputs:");
-                                    for (i, output) in results.iter().enumerate() {
-                                        println!("Step {}: {:?}", i + 1, output);
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("Workflow execution failed: {}", e);
+                    let clean_yaml = strip_code_fences(&yaml);
+                    match serde_yaml::from_str::<lao_orchestrator_core::Workflow>(&clean_yaml) {
+                        Ok(_workflow) => {
+                            let out_path = output.unwrap_or_else(|| "workflows/generated_from_prompt.yaml".to_string());
+                            if let Some(parent) = std::path::Path::new(&out_path).parent() {
+                                if let Err(e) = std::fs::create_dir_all(parent) {
+                                    eprintln!("[ERROR] Failed to create directory {}: {}", parent.display(), e);
                                     std::process::exit(1);
                                 }
                             }
+                            if let Err(e) = std::fs::write(&out_path, &clean_yaml) {
+                                eprintln!("[ERROR] Failed to write workflow file {}: {}", out_path, e);
+                                std::process::exit(1);
+                            }
+                            println!("Workflow saved to {}", out_path);
                         }
                         Err(e) => {
                             eprintln!("Failed to parse generated workflow YAML: {}", e);
@@ -218,6 +245,55 @@ fn main() {
             }
             println!("\nTest Summary: {} passed, {} failed, {} total", passed, failed, passed + failed);
             if failed > 0 { std::process::exit(1); }
+        }
+        Commands::ListWorkflows => {
+            let dir = std::path::Path::new("workflows");
+            match std::fs::read_dir(dir) {
+                Ok(entries) => {
+                    println!("Available workflows:");
+                    let mut found = false;
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if let Some(ext) = path.extension() {
+                            if ext == "yaml" || ext == "yml" {
+                                println!("- {}", path.file_name().unwrap().to_string_lossy());
+                                found = true;
+                            }
+                        }
+                    }
+                    if !found {
+                        println!("[INFO] No workflow YAML files found in workflows/ directory.");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to read workflows directory: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::ViewWorkflow { name } => {
+            let path = format!("workflows/{}.yaml", name);
+            match std::fs::read_to_string(&path) {
+                Ok(contents) => {
+                    println!("Workflow {}:\n{}", name, contents);
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to read workflow file {}: {}", path, e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::DeleteWorkflow { name } => {
+            let path = format!("workflows/{}.yaml", name);
+            match std::fs::remove_file(&path) {
+                Ok(_) => {
+                    println!("Deleted workflow file {}", path);
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to delete workflow file {}: {}", path, e);
+                    std::process::exit(1);
+                }
+            }
         }
     }
 } 

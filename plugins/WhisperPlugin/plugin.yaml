@@ -1,0 +1,11 @@
+name: WhisperPlugin
+version: 0.1.0
+description: Transcribes audio using whisper.cpp
+maintainer: LAO Contributors
+tags: [audio, transcription]
+input:
+  type: audio
+output:
+  type: text
+example_prompts:
+  - "Transcribe this audio file" 

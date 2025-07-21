@@ -72,7 +72,8 @@ lao prompt "Refactor this Python file and add comments"
 ---
 
 ## 🛠️ Contributing Plugins & Prompts
-- Add new plugins by implementing the `LaoPlugin` trait and registering in the registry
+- Add new plugins by implementing the `LaoPlugin` trait, building as a `cdylib`, and placing the resulting library in the `plugins/` directory
+- Expose a C ABI function named `plugin_entry_point` that returns a `Box<dyn LaoPlugin>`
 - Add prompt/workflow pairs to the prompt library for validation and LLM tuning
 - See `docs/plugins.md` and `docs/workflows.md` for details
 

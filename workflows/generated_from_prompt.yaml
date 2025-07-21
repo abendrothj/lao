@@ -1,0 +1,11 @@
+workflow: "Audio Tagged Summary"
+steps:
+  - run: Whisper
+    input: "audio.wav"
+    description: "Transcribe the audio file to text."
+  - run: Summarizer
+    input_from: Whisper
+    description: "Summarize the transcribed text."
+  - run: Tagger
+    input_from: Summarizer
+    description: "Tag action items in the summary."

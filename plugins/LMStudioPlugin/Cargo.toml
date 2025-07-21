@@ -1,0 +1,12 @@
+[package]
+name = "lmstudio_plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Offline LLM via LM Studio"
+authors = ["LAO Contributors"]
+
+[dependencies]
+lao_plugin_api = { path = "../../lao_plugin_api" } 
+
+[lib]
+crate-type = ["cdylib"] 

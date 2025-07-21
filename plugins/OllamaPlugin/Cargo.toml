@@ -1,0 +1,12 @@
+[package]
+name = "ollama_plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Runs LLM inference using Ollama"
+authors = ["LAO Contributors"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+lao_plugin_api = { path = "../../lao_plugin_api" } 

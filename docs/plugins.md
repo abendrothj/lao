@@ -20,30 +20,19 @@ A plugin is a modular unit of computation that implements the `LaoPlugin` trait.
 - Add new plugins to the registry and update the system prompt to make them available for agentic workflows
 
 ## Contributing Plugins
-- Implement the `LaoPlugin` trait
-- Register in `PluginRegistry::default_registry()`
+- Implement the `LaoPlugin` trait in your plugin crate
+- Build your plugin as a `cdylib` and place the resulting dynamic library (.dll/.so/.dylib) in the `plugins/` directory
+- Expose a C ABI function named `plugin_entry_point` that returns a `Box<dyn LaoPlugin>`
 - Add prompt/workflow pairs to the prompt library for validation
 
-## Example Trait
+## Example Plugin Entry Point
 ```rust
-pub trait LaoPlugin {
-    fn name(&self) -> &'static str;
-    fn init(&mut self, config: PluginConfig) -> Result<(), LaoError>;
-    fn pre_execute(&mut self) -> Result<(), LaoError> { Ok(()) }
-    fn execute(&self, input: PluginInput) -> Result<PluginOutput, LaoError>;
-    fn post_execute(&mut self) -> Result<(), LaoError> { Ok(()) }
-    fn io_signature(&self) -> IOSignature;
-    fn shutdown(&mut self) -> Result<(), LaoError> { Ok(()) }
+#[no_mangle]
+pub extern "C" fn plugin_entry_point() -> *mut dyn LaoPlugin {
+    Box::into_raw(Box::new(EchoPlugin))
 }
 ```
 
-## Registering Plugins
-Add your plugin to the `PluginRegistry` in `default_registry()`.
-
 ## Using Plugins in Workflows
 Reference the plugin by name in your workflow YAML:
-```yaml
-steps:
-  - run: Echo
-    input: "Hello!"
-``` 
+```

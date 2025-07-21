@@ -8,5 +8,25 @@ Rules:
 - Construct valid YAML workflow specs (DAG format)
 - Inputs may be file paths, user text, or JSON
 - Include descriptions for each step when available
+- The top-level key for the workflow steps MUST be 'steps:', not 'tasks:' or any other name.
+- Each step must use the field 'run:' to specify the plugin name (e.g., 'run: Whisper').
+- Only use these fields in each step: 'run', 'input', 'input_from', 'depends_on', 'retries', 'retry_delay', 'cache_key', 'description'.
+- Do NOT use 'plugin:', 'name:', or any other field for the plugin or step name.
+- Do not invent new fields or change field names.
+- For the Whisper plugin, use the field 'audio_file' to specify the path to the audio file.
+- Do not use 'input:' for Whisper; always use 'audio_file:'.
 
-Your response must be the YAML workflow ready for execution. 
+Example:
+workflow: "Audio Summary"
+steps:
+  - run: Whisper
+    audio_file: "audio.wav"
+    description: "Transcribe the audio file to text."
+  - run: Summarizer
+    input_from: Whisper
+    description: "Summarize the transcribed text."
+  - run: Tagger
+    input_from: Summarizer
+    description: "Tag action items in the summary."
+
+Your response must be ONLY the raw YAML workflow, with NO markdown code fences, no extra formatting, and no commentary—just valid YAML. 

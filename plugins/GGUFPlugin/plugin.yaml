@@ -1,0 +1,11 @@
+name: GGUFPlugin
+version: 0.1.0
+description: Offline LLM via GGUF
+maintainer: LAO Contributors
+tags: [llm, offline, text]
+input:
+  type: text
+output:
+  type: text
+example_prompts:
+  - "Summarize this document" 

@@ -1,5 +1,6 @@
 <script>
   import { invoke } from "@tauri-apps/api/core";
+  import { mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
 
   let name = $state("");
   let greetMsg = $state("");
@@ -70,15 +71,18 @@ steps:
       genError = "Please enter a prompt.";
       return;
     }
+    // Add a note to the user
+    genError = "Generating workflow... this may take a few seconds.";
     try {
       const yaml = await invoke("dispatch_prompt", { prompt });
       generatedYaml = yaml;
+      genError = "";
       // Parse YAML to graph for visualization
       // Save YAML to a temp file and load as graph
       // For now, call get_workflow_graph with a temp file
       const tempPath = "workflows/generated_from_prompt.yaml";
-      await window.__TAURI__.fs.createDir("workflows", { recursive: true });
-      await window.__TAURI__.fs.writeFile({ path: tempPath, contents: yaml });
+      await mkdir("workflows", { recursive: true });
+      await writeTextFile(tempPath, yaml);
       genGraph = await invoke("get_workflow_graph", { path: tempPath });
     } catch (e) {
       genError = e.message || e;

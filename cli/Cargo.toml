@@ -10,6 +10,7 @@ clap = { version = "4", features = ["derive"] }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+serde_json = "1"
 lao-orchestrator-core = { path = "../core" } 
 
 [[bin]]

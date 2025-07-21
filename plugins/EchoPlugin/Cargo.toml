@@ -1,0 +1,12 @@
+[package]
+name = "echo_plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Echoes the input as output"
+authors = ["LAO Contributors"]
+
+[dependencies]
+lao_plugin_api = { path = "../../lao_plugin_api" } 
+
+[lib]
+crate-type = ["cdylib"] 

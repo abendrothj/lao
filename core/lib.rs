@@ -174,7 +174,7 @@ pub fn validate_workflow_types(
 pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
     let workflow = load_workflow_yaml(path)?;
     let dag = build_dag(&workflow.steps)?;
-    let mut plugin_registry = PluginRegistry::default_registry();
+    let mut plugin_registry = PluginRegistry::dynamic_registry("plugins/");
     let validation_errors = validate_workflow_types(&dag, &plugin_registry);
     let mut logs = Vec::new();
     if !validation_errors.is_empty() {

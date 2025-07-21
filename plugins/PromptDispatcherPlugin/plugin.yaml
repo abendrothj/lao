@@ -1,0 +1,11 @@
+name: PromptDispatcherPlugin
+version: 0.1.0
+description: Generates a workflow plan from a prompt using a local LLM (Ollama)
+maintainer: LAO Contributors
+tags: [workflow, dispatcher, llm]
+input:
+  type: text
+output:
+  type: text
+example_prompts:
+  - "Summarize this audio and tag action items" 

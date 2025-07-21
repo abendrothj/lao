@@ -1,0 +1,11 @@
+name: OllamaPlugin
+version: 0.1.0
+description: Runs LLM inference using Ollama
+maintainer: LAO Contributors
+tags: [llm, text, inference]
+input:
+  type: text
+output:
+  type: text
+example_prompts:
+  - "Generate a summary of this text" 
