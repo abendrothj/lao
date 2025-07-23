@@ -155,6 +155,10 @@ pub fn validate_workflow_types(
     let mut node_outputs: HashMap<String, plugins::PluginInputType> = HashMap::new();
     for (i, node) in dag.iter().enumerate() {
         let step = &node.step;
+        if !plugin_registry.plugins.contains_key(&step.run) {
+            errors.push((i+1, format!("Step {} references missing plugin '{}'", i+1, step.run)));
+            continue;
+        }
         // Remove or comment out all lines using plugin.io_signature(), input_type, output_type, and related type validation logic.
         let input_type = plugins::PluginInputType::Any;
         let output_type = plugins::PluginInputType::Any;
@@ -198,7 +202,23 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
     let mut outputs: HashMap<String, String> = HashMap::new();
     let node_map: HashMap<String, &DagNode> = dag.iter().map(|n| (n.id.clone(), n)).collect();
     for node_id in order {
-        let node = node_map.get(&node_id).unwrap();
+        let node = match node_map.get(&node_id) {
+            Some(n) => n,
+            None => {
+                logs.push(StepLog {
+                    step: node_id[4..].parse().unwrap_or(0),
+                    runner: "ERROR".into(),
+                    input: serde_yaml::Value::Null,
+                    output: None,
+                    error: Some(format!("Node {} not found in DAG", node_id)),
+                    attempt: 0,
+                    input_type: None,
+                    output_type: None,
+                    validation: Some("error".into()),
+                });
+                break;
+            }
+        };
         let step = &node.step;
         let mut params = step.params.clone();
         // If input_from is set, inject the output of the parent as 'input'
@@ -221,7 +241,20 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
         let mut validation: Option<String> = Some("ok".into());
         // Caching logic
         let cache_dir = std_env::var("LAO_CACHE_DIR").unwrap_or_else(|_| "cache".to_string());
-        std::fs::create_dir_all(&cache_dir).ok();
+        if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+            logs.push(StepLog {
+                step: node_id[4..].parse().unwrap_or(0),
+                runner: step.run.clone(),
+                input: params.clone(),
+                output: None,
+                error: Some(format!("Failed to create cache dir: {}", e)),
+                attempt: 0,
+                input_type: None,
+                output_type: None,
+                validation: Some("error".into()),
+            });
+            break;
+        }
         let cache_key = step.cache_key.as_ref().map(|k| k.clone());
         let cache_path = cache_key.as_ref().map(|k| format!("{}/{}.json", cache_dir, k));
         let mut cache_status = None;
@@ -257,25 +290,71 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
             }
             if let Some(plugin) = plugin_registry.get(&step.run) {
                 let input = build_plugin_input(&params);
+                // Debug: print raw input for plugin
+                unsafe {
+                    if !input.text.is_null() {
+                        let c_str = std::ffi::CStr::from_ptr(input.text);
+                        println!("[DEBUG] Raw input to plugin '{}': {}", step.run, c_str.to_string_lossy());
+                    } else {
+                        println!("[DEBUG] Raw input to plugin '{}': <null>", step.run);
+                    }
+                }
                 let vtable = unsafe { &*plugin.vtable };
-                let plugin_output = unsafe { (vtable.run)(&input) };
-                let out_str = if !plugin_output.text.is_null() {
-                    let c_str = unsafe { std::ffi::CStr::from_ptr(plugin_output.text) };
-                    let s = c_str.to_string_lossy().to_string();
-                    // Free the output string
-                    unsafe { (vtable.free_output)(plugin_output) };
-                    s
+                println!("[DEBUG] PluginVTable fn ptrs: name={:p} run={:p} free_output={:p} run_with_buffer={:p}",
+                    vtable.name as *const (), vtable.run as *const (), vtable.free_output as *const (), vtable.run_with_buffer as *const ());
+                if let Some(run_with_buffer) = plugin.run_with_buffer {
+                    println!("[DEBUG] Echo plugin run_with_buffer fn ptr: {:p}", run_with_buffer as *const ());
+                    let mut buffer = vec![0u8; 4096];
+                    let written = unsafe { run_with_buffer(&input, buffer.as_mut_ptr() as *mut i8, buffer.len()) };
+                    println!("[DEBUG] Echo plugin run_with_buffer wrote {} bytes", written);
+                    println!("[DEBUG] Echo plugin run_with_buffer buffer bytes: {:?}", &buffer[..std::cmp::min(written, 32)]);
+                    if written > 0 && written < buffer.len() {
+                        let s = String::from_utf8_lossy(&buffer[..written]).to_string();
+                        println!("[DEBUG] Echo plugin run_with_buffer output: {}", s);
+                        output = Some(s.clone());
+                        outputs.insert(node_id.clone(), s);
+                    } else {
+                        println!("[DEBUG] Echo plugin run_with_buffer returned no output");
+                        output = None;
+                        last_err = Some("Plugin returned no output (invalid input?)".to_string());
+                    }
                 } else {
-                    String::new()
-                };
-                output = Some(out_str.clone());
-                outputs.insert(node_id.clone(), out_str.clone());
-                last_err = None;
+                    // SAFETY: FFI call to plugin, must ensure input is valid and plugin is trusted.
+                    let plugin_output = unsafe { (vtable.run)(&input) };
+                    println!("[DEBUG] Echo plugin_output.text ptr: {:?}", plugin_output.text);
+                    if !plugin_output.text.is_null() {
+                        let c_str = unsafe { std::ffi::CStr::from_ptr(plugin_output.text) };
+                        println!("[DEBUG] Echo plugin_output.text string: {}", c_str.to_string_lossy());
+                        let out_str = c_str.to_string_lossy().to_string();
+                        output = Some(out_str.clone());
+                        outputs.insert(node_id.clone(), out_str);
+                        unsafe { (vtable.free_output)(plugin_output) };
+                    } else {
+                        println!("[DEBUG] Echo plugin_output.text is null");
+                        output = None;
+                        last_err = Some("Plugin returned no output (invalid input?)".to_string());
+                    }
+                }
                 // Save to cache if cache_key is set
                 if let Some(ref path) = cache_path {
-                    std::fs::write(path, serde_json::to_string(&out_str).unwrap_or_default()).ok();
-                    println!("STEP {}: cache saved to {}", step.run, path);
-                    cache_status = Some("saved".to_string());
+                    if let Some(ref out_val) = output {
+                        if let Err(e) = std::fs::write(path, serde_json::to_string(out_val).unwrap_or_default()) {
+                            logs.push(StepLog {
+                                step: node_id[4..].parse().unwrap_or(0),
+                                runner: step.run.clone(),
+                                input: params.clone(),
+                                output: None,
+                                error: Some(format!("Failed to write cache: {}", e)),
+                                attempt,
+                                input_type: None,
+                                output_type: None,
+                                validation: Some("error".into()),
+                            });
+                        } else {
+                            println!("STEP {}: cache saved to {}", step.run, path);
+                            cache_status = Some("saved".to_string());
+                        }
+                    }
                 }
                 break;
             }
@@ -334,12 +413,16 @@ fn build_plugin_input(params: &serde_yaml::Value) -> PluginInput {
     if let Some(map) = params.as_mapping() {
         if let Some(val) = map.get(&serde_yaml::Value::from("input")) {
             if let Some(s) = val.as_str() {
-                let cstr = CString::new(s).unwrap();
-                return PluginInput { text: cstr.into_raw() };
+                match CString::new(s) {
+                    Ok(cstr) => return PluginInput { text: cstr.into_raw() },
+                    Err(_) => return PluginInput { text: std::ptr::null_mut() },
+                }
             }
         }
     }
     // Fallback: pass empty string
-    let cstr = CString::new("").unwrap();
-    PluginInput { text: cstr.into_raw() }
+    match CString::new("") {
+        Ok(cstr) => PluginInput { text: cstr.into_raw() },
+        Err(_) => PluginInput { text: std::ptr::null_mut() },
+    }
 }

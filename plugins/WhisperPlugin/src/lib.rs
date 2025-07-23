@@ -36,11 +36,17 @@ unsafe extern "C" fn free_output(output: PluginOutput) {
     }
 }
 
+unsafe extern "C" fn run_with_buffer(_input: *const lao_plugin_api::PluginInput, _buffer: *mut std::os::raw::c_char, _buffer_len: usize) -> usize {
+    0 // Not implemented for WhisperPlugin
+}
+
 #[no_mangle]
-pub static PLUGIN_VTABLE: PluginVTable = PluginVTable {
+pub static PLUGIN_VTABLE: lao_plugin_api::PluginVTable = lao_plugin_api::PluginVTable {
+    version: 1,
     name,
     run,
     free_output,
+    run_with_buffer,
 };
 
 #[no_mangle]

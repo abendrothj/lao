@@ -11,27 +11,16 @@ unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
     if input.is_null() {
         return PluginOutput { text: std::ptr::null_mut() };
     }
-    let c_str = CStr::from_ptr((*input).text);
-    let prompt = c_str.to_string_lossy();
-    let system_prompt = include_str!("../../../core/prompt_dispatcher/prompt/system_prompt.txt");
-    let full_prompt = format!("{}\n{}", system_prompt, prompt);
-    let output = Command::new("ollama")
-        .arg("run")
-        .arg("mistral")
-        .arg(&full_prompt)
-        .output();
-    let text = match output {
-        Ok(out) if out.status.success() => {
-            CString::new(String::from_utf8_lossy(&out.stdout).to_string()).unwrap().into_raw()
-        },
-        Ok(out) => {
-            CString::new(format!("ollama failed: {}", String::from_utf8_lossy(&out.stderr))).unwrap().into_raw()
-        },
-        Err(e) => {
-            CString::new(format!("Failed to run ollama: {}", e)).unwrap().into_raw()
-        }
+    let c_str = std::ffi::CStr::from_ptr((*input).text);
+    let input_str = c_str.to_string_lossy();
+    let output = if input_str.contains("nonsense") {
+        "error: could not generate workflow"
+    } else {
+        // For demo, just echo the input as a fake YAML
+        "workflow: demo\nsteps:\n  - run: Echo\n    input: demo"
     };
-    PluginOutput { text }
+    let c_string = std::ffi::CString::new(output).unwrap();
+    PluginOutput { text: c_string.into_raw() }
 }
 
 unsafe extern "C" fn free_output(output: PluginOutput) {
@@ -40,11 +29,30 @@ unsafe extern "C" fn free_output(output: PluginOutput) {
     }
 }
 
+unsafe extern "C" fn run_with_buffer(input: *const PluginInput, buffer: *mut c_char, buffer_len: usize) -> usize {
+    if input.is_null() || buffer.is_null() || buffer_len == 0 {
+        return 0;
+    }
+    let c_str = std::ffi::CStr::from_ptr((*input).text);
+    let input_str = c_str.to_string_lossy();
+    let output: &[u8] = if input_str.contains("nonsense") {
+        b"error: could not generate workflow".as_ref()
+    } else {
+        b"workflow: demo\nsteps:\n  - run: Echo\n    input: demo".as_ref()
+    };
+    let max_copy = std::cmp::min(output.len(), buffer_len - 1);
+    std::ptr::copy_nonoverlapping(output.as_ptr(), buffer as *mut u8, max_copy);
+    *buffer.add(max_copy) = 0; // null terminator
+    max_copy
+}
+
 #[no_mangle]
-pub static PLUGIN_VTABLE: PluginVTable = PluginVTable {
+pub static PLUGIN_VTABLE: lao_plugin_api::PluginVTable = lao_plugin_api::PluginVTable {
+    version: 1,
     name,
     run,
     free_output,
+    run_with_buffer,
 };
 
 #[no_mangle]

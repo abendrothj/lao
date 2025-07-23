@@ -1,6 +1,8 @@
 <script>
   import { invoke } from "@tauri-apps/api/core";
   import { mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
+  import { dndzone } from "svelte-dnd-action";
+  import { onMount } from "svelte";
 
   let name = $state("");
   let greetMsg = $state("");
@@ -12,6 +14,29 @@
   let newNodeName = $state("");
   let newNodeType = $state("Echo");
   let yamlExport = $state("");
+
+  // Drag-and-drop state
+  let dndNodes = $state([]);
+  $: if (graph) dndNodes = graph.nodes;
+
+  function handleDnd({ detail }) {
+    if (graph) {
+      graph.nodes = detail.items;
+    }
+  }
+
+  // Live logs
+  let liveLogs = $state([]);
+  let logInterval;
+  onMount(() => {
+    // Mock: poll logs every second (replace with backend event subscription)
+    logInterval = setInterval(() => {
+      // Simulate log update
+      liveLogs = [...liveLogs, `Log entry at ${new Date().toLocaleTimeString()}`];
+      if (liveLogs.length > 20) liveLogs.shift();
+    }, 1000);
+    return () => clearInterval(logInterval);
+  });
 
   // Prompt-driven workflow state
   let prompt = $state("");
@@ -140,10 +165,10 @@ steps:
     {/if}
     {#if graph}
       <div style="margin-top: 1em;">
-        <h3>Nodes</h3>
-        <ul>
-          {#each graph.nodes as node}
-            <li>
+        <h3>Nodes (Drag to Reorder)</h3>
+        <ul use:dndzone={{ items: dndNodes, flipDurationMs: 200 }} on:consider={handleDnd} on:finalize={handleDnd}>
+          {#each dndNodes as node (node.id)}
+            <li class="dnd-node">
               <b>{node.id}</b>: {node.run} (<i>{node.status}</i>)
               <button onclick={() => removeNode(node.id)}>Remove</button>
             </li>
@@ -169,6 +194,14 @@ steps:
         {/if}
       </div>
     {/if}
+  </section>
+  <section style="margin-top: 2em;">
+    <h2>Live Logs</h2>
+    <div class="live-logs">
+      {#each liveLogs as log}
+        <div class="log-entry">{log}</div>
+      {/each}
+    </div>
   </section>
 </main>
 
@@ -327,4 +360,27 @@ button {
   }
 }
 
+.dnd-node {
+  background: #f0f0f0;
+  margin-bottom: 0.5em;
+  padding: 0.5em 1em;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  display: flex;
+  align-items: center;
+  gap: 1em;
+}
+.live-logs {
+  background: #222;
+  color: #fff;
+  border-radius: 8px;
+  padding: 1em 2em;
+  min-height: 120px;
+  max-height: 240px;
+  overflow-y: auto;
+  font-family: monospace;
+}
+.log-entry {
+  margin-bottom: 0.25em;
+}
 </style>

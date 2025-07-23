@@ -2,6 +2,9 @@
 $releaseDir = "target/release"
 $pluginDir = "plugins"
 
+# Delete all existing DLLs in the plugins directory
+Get-ChildItem -Path $pluginDir -Filter "*.dll" -File | Remove-Item -Force
+
 # Find all plugin DLLs in the release directory
 $dlls = Get-ChildItem -Path $releaseDir -Filter "*.dll" -File
 

@@ -76,6 +76,10 @@ enum Commands {
     DeleteWorkflow {
         name: String,
     },
+    /// Explain a plugin's capabilities, schemas, and usage examples
+    ExplainPlugin {
+        name: String,
+    },
 }
 
 fn main() {
@@ -124,7 +128,13 @@ fn main() {
             match load_workflow_yaml(&path) {
                 Ok(workflow) => {
                     let plugin_registry = PluginRegistry::dynamic_registry("plugins/");
-                    let dag = lao_orchestrator_core::build_dag(&workflow.steps).unwrap();
+                    let dag = match lao_orchestrator_core::build_dag(&workflow.steps) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            eprintln!("[ERROR] Failed to build DAG: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
                     let errors = lao_orchestrator_core::validate_workflow_types(&dag, &plugin_registry);
                     if errors.is_empty() {
                         println!("Validation passed: all steps and plugins available.");
@@ -169,10 +179,22 @@ fn main() {
         Commands::Prompt { prompt, output } => {
             // Use the PromptDispatcherPlugin to generate a workflow YAML
             let mut registry = PluginRegistry::dynamic_registry("plugins/");
-            let dispatcher = registry.plugins.get("PromptDispatcher").expect("PromptDispatcherPlugin not found");
-            // Call the run function via the vtable
+            let dispatcher = match registry.plugins.get("PromptDispatcher") {
+                Some(d) => d,
+                None => {
+                    eprintln!("PromptDispatcherPlugin not found");
+                    std::process::exit(1);
+                }
+            };
+            // SAFETY: FFI call to plugin, must ensure input is valid and plugin is trusted.
             use std::ffi::CString;
-            let c_prompt = CString::new(prompt.clone()).unwrap();
+            let c_prompt = match CString::new(prompt.clone()) {
+                Ok(c) => c,
+                Err(_) => {
+                    eprintln!("Failed to create CString from prompt");
+                    std::process::exit(1);
+                }
+            };
             let input = PluginInput { text: c_prompt.as_ptr() };
             let output_obj = unsafe { ((*dispatcher.vtable).run)(&input) };
             let c_str = unsafe { std::ffi::CStr::from_ptr(output_obj.text) };
@@ -204,15 +226,40 @@ fn main() {
         Commands::ValidatePrompts { path, fail_fast, verbose } => {
             // Load prompt pairs from the prompt library JSON
             let prompt_pairs: Vec<PromptPair> = {
-                let data = std::fs::read_to_string(&path).expect("Failed to read prompt library");
-                serde_json::from_str(&data).expect("Failed to parse prompt library JSON")
+                let data = match std::fs::read_to_string(&path) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        eprintln!("Failed to read prompt library: {}", e);
+                        std::process::exit(1);
+                    }
+                };
+                match serde_json::from_str(&data) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("Failed to parse prompt library JSON: {}", e);
+                        std::process::exit(1);
+                    }
+                }
             };
             let mut registry = PluginRegistry::dynamic_registry("plugins/");
-            let dispatcher = registry.plugins.get("PromptDispatcher").expect("PromptDispatcherPlugin not found");
+            let dispatcher = match registry.plugins.get("PromptDispatcher") {
+                Some(d) => d,
+                None => {
+                    eprintln!("PromptDispatcherPlugin not found");
+                    std::process::exit(1);
+                }
+            };
             let mut failures = 0;
             for (i, pair) in prompt_pairs.iter().enumerate() {
                 use std::ffi::CString;
-                let c_prompt = CString::new(pair.prompt.clone()).unwrap();
+                let c_prompt = match CString::new(pair.prompt.clone()) {
+                    Ok(c) => c,
+                    Err(_) => {
+                        eprintln!("Failed to create CString from prompt");
+                        failures += 1;
+                        continue;
+                    }
+                };
                 let input = PluginInput { text: c_prompt.as_ptr() };
                 let output_obj = unsafe { ((*dispatcher.vtable).run)(&input) };
                 let c_str = unsafe { std::ffi::CStr::from_ptr(output_obj.text) };
@@ -249,7 +296,10 @@ fn main() {
                         let path = entry.path();
                         if let Some(ext) = path.extension() {
                             if ext == "yaml" || ext == "yml" {
-                                println!("- {}", path.file_name().unwrap().to_string_lossy());
+                                match path.file_name() {
+                                    Some(name) => println!("- {}", name.to_string_lossy()),
+                                    None => println!("- [unknown file name]"),
+                                }
                                 found = true;
                             }
                         }
@@ -285,6 +335,49 @@ fn main() {
                 Err(e) => {
                     eprintln!("[ERROR] Failed to delete workflow file {}: {}", path, e);
                     std::process::exit(1);
+                }
+            }
+        }
+        Commands::ExplainPlugin { name } => {
+            use std::fs;
+            use std::path::Path;
+            let plugin_dir = format!("plugins/{}Plugin", name);
+            let yaml_path = Path::new(&plugin_dir).join("plugin.yaml");
+            let yaml_str = match fs::read_to_string(&yaml_path) {
+                Ok(s) => s,
+                Err(_) => {
+                    eprintln!("[ERROR] plugin.yaml not found for plugin '{}'. Looked in {}", name, yaml_path.display());
+                    std::process::exit(1);
+                }
+            };
+            let manifest: serde_yaml::Value = match serde_yaml::from_str(&yaml_str) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to parse plugin.yaml: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            println!("\n--- Plugin: {} ---", name);
+            if let Some(desc) = manifest.get("description").and_then(|v| v.as_str()) {
+                println!("Description: {}", desc);
+            }
+            if let Some(tags) = manifest.get("tags") {
+                println!("Tags: {:?}", tags);
+            }
+            if let Some(input) = manifest.get("input") {
+                println!("Input Schema: {}", serde_yaml::to_string(input).unwrap_or_default().trim());
+            }
+            if let Some(output) = manifest.get("output") {
+                println!("Output Schema: {}", serde_yaml::to_string(output).unwrap_or_default().trim());
+            }
+            if let Some(examples) = manifest.get("example_prompts") {
+                println!("Example Prompts:");
+                if let Some(arr) = examples.as_sequence() {
+                    for ex in arr {
+                        println!("  - {:?}", ex);
+                    }
+                } else {
+                    println!("  - {:?}", examples);
                 }
             }
         }
