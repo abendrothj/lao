@@ -16,7 +16,7 @@
     "@tauri-apps/api": "^2.7.0",
     "@tauri-apps/plugin-fs": "^2.4.1",
     "@tauri-apps/plugin-opener": "^2",
-    "svelte-dnd-action": "^0.10.0"
+    "svelte-dnd-action": "^0.9.64"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",

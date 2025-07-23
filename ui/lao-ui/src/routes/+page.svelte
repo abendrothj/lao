@@ -17,7 +17,7 @@
 
   // Drag-and-drop state
   let dndNodes = $state([]);
-  $: if (graph) dndNodes = graph.nodes;
+  $effect(() => { if (graph) dndNodes = graph.nodes; });
 
   function handleDnd({ detail }) {
     if (graph) {
@@ -166,7 +166,7 @@ steps:
     {#if graph}
       <div style="margin-top: 1em;">
         <h3>Nodes (Drag to Reorder)</h3>
-        <ul use:dndzone={{ items: dndNodes, flipDurationMs: 200 }} on:consider={handleDnd} on:finalize={handleDnd}>
+        <ul use:dndzone={{ items: dndNodes, flipDurationMs: 200 }} onconsider={handleDnd} onfinalize={handleDnd}>
           {#each dndNodes as node (node.id)}
             <li class="dnd-node">
               <b>{node.id}</b>: {node.run} (<i>{node.status}</i>)

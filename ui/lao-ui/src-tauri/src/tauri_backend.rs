@@ -1,6 +1,7 @@
 use lao_orchestrator_core::{load_workflow_yaml, run_model_runner, run_workflow_yaml, Workflow, WorkflowStep};
 use serde::Serialize;
 use tauri_plugin_fs;
+use lao_plugin_api::{PluginInput, PluginOutput};
 
 #[derive(Serialize)]
 pub struct WorkflowGraph {
@@ -71,13 +72,15 @@ fn get_workflow_graph(path: &str) -> Result<WorkflowGraph, String> {
 
 #[tauri::command]
 fn dispatch_prompt(prompt: String) -> Result<String, String> {
-    let mut registry = lao_orchestrator_core::plugins::PluginRegistry::default_registry();
-    let dispatcher = registry.get_mut("PromptDispatcher").ok_or("PromptDispatcherPlugin not found")?;
-    match dispatcher.execute(lao_orchestrator_core::plugins::PluginInput::Text(prompt)) {
-        Ok(lao_orchestrator_core::plugins::PluginOutput::Text(yaml)) => Ok(yaml),
-        Ok(_) => Err("PromptDispatcher did not return YAML text".to_string()),
-        Err(e) => Err(format!("PromptDispatcher failed: {:?}", e)),
-    }
+    let mut registry = lao_orchestrator_core::plugins::PluginRegistry::dynamic_registry("plugins/");
+    let dispatcher = registry.plugins.get_mut("PromptDispatcherPlugin").ok_or("PromptDispatcherPlugin not found")?;
+    let c_prompt = std::ffi::CString::new(prompt).map_err(|e| format!("CString error: {}", e))?;
+    let input = PluginInput { text: c_prompt.as_ptr() };
+    let output_obj = unsafe { ((*dispatcher.vtable).run)(&input) };
+    let c_str = unsafe { std::ffi::CStr::from_ptr(output_obj.text) };
+    let yaml = c_str.to_string_lossy().to_string();
+    unsafe { ((*dispatcher.vtable).free_output)(output_obj) };
+    Ok(yaml)
 }
 
 pub fn run() {

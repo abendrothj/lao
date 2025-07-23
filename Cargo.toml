@@ -3,5 +3,6 @@ members = [
     "core",
     "cli",
     "lao_plugin_api",
-    "plugins/*"
+    "plugins/*",
+    "ui/lao-ui"
 ] 

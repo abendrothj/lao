@@ -11,6 +11,7 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 lao-orchestrator-core = { path = "../../core" }
 tauri-plugin-fs = "2"
+lao_plugin_api = { path = "../../lao_plugin_api" }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
