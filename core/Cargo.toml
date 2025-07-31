@@ -30,5 +30,5 @@ path = "test_runner.rs"
 [dev-dependencies]
 clippy = "*"
 rustfmt = "*"
-serial_test = "2.0"
+serial_test = "3.2"
 
