@@ -1,7 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+    format!("Hello, {name}! You've been greeted from Rust!")
 }
 
 // --- Workflow Engine (Step 2) ---
@@ -84,11 +84,11 @@ pub fn run_model_runner(runner: &str, params: serde_yaml::Value) -> Result<Strin
     } else {
         // Fallback: pass all params as stringified args
         for (k, v) in params.as_mapping().unwrap_or(&serde_yaml::Mapping::new()) {
-            cmd.arg(format!("--{:?}", k)).arg(format!("{:?}", v));
+            cmd.arg(format!("--{k:?}")).arg(format!("{v:?}"));
         }
     }
     // Run the command and capture output
-    let output = cmd.output().map_err(|e| format!("Failed to run {}: {}", runner, e))?;
+    let output = cmd.output().map_err(|e| format!("Failed to run {runner}: {e}"))?;
     if !output.status.success() {
         return Err(format!("{} failed: {}", runner, String::from_utf8_lossy(&output.stderr)));
     }
@@ -97,8 +97,8 @@ pub fn run_model_runner(runner: &str, params: serde_yaml::Value) -> Result<Strin
 
 pub fn build_dag(steps: &[WorkflowStep]) -> Result<Vec<DagNode>, String> {
     let mut nodes = Vec::new();
-    for (i, step) in steps.iter().enumerate() {
-        let id = format!("step{}", i + 1);
+    for step in steps.iter() {
+        let id = step.run.clone();
         let mut parents = Vec::new();
         if let Some(ref from) = step.input_from {
             parents.push(from.clone());
@@ -113,7 +113,7 @@ pub fn build_dag(steps: &[WorkflowStep]) -> Result<Vec<DagNode>, String> {
     Ok(nodes)
 }
 
-fn topo_sort(nodes: &[DagNode]) -> Result<Vec<String>, String> {
+pub fn topo_sort(nodes: &[DagNode]) -> Result<Vec<String>, String> {
     let mut order = Vec::new();
     let mut visited = std::collections::HashSet::new();
     let mut visiting = std::collections::HashSet::new();
@@ -179,7 +179,7 @@ pub fn validate_workflow_types(
 pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
     let workflow = load_workflow_yaml(path)?;
     let dag = build_dag(&workflow.steps)?;
-    let mut plugin_registry = PluginRegistry::dynamic_registry("plugins/");
+    let plugin_registry = PluginRegistry::dynamic_registry("../plugins/");
     let validation_errors = validate_workflow_types(&dag, &plugin_registry);
     let mut logs = Vec::new();
     if !validation_errors.is_empty() {
@@ -210,7 +210,7 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
                     runner: "ERROR".into(),
                     input: serde_yaml::Value::Null,
                     output: None,
-                    error: Some(format!("Node {} not found in DAG", node_id)),
+                    error: Some(format!("Node {node_id} not found in DAG")),
                     attempt: 0,
                     input_type: None,
                     output_type: None,
@@ -236,9 +236,9 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
         let mut output = None;
         let mut attempt = 0;
         let start_time = Instant::now();
-        let mut input_type = None;
-        let mut output_type = None;
-        let mut validation: Option<String> = Some("ok".into());
+        let input_type = None;
+        let output_type = None;
+        let validation: Option<String> = Some("ok".into());
         // Caching logic
         let cache_dir = std_env::var("LAO_CACHE_DIR").unwrap_or_else(|_| "cache".to_string());
         if let Err(e) = std::fs::create_dir_all(&cache_dir) {
@@ -247,7 +247,7 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
                 runner: step.run.clone(),
                 input: params.clone(),
                 output: None,
-                error: Some(format!("Failed to create cache dir: {}", e)),
+                error: Some(format!("Failed to create cache dir: {e}")),
                 attempt: 0,
                 input_type: None,
                 output_type: None,
@@ -255,8 +255,8 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
             });
             break;
         }
-        let cache_key = step.cache_key.as_ref().map(|k| k.clone());
-        let cache_path = cache_key.as_ref().map(|k| format!("{}/{}.json", cache_dir, k));
+        let cache_key = step.cache_key.clone();
+        let cache_path = cache_key.as_ref().map(|k| format!("{cache_dir}/{k}.json"));
         let mut cache_status = None;
         if let Some(ref path) = cache_path {
             if let Ok(cached) = std::fs::read_to_string(path) {
@@ -284,7 +284,7 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
         for try_num in 1..=retries {
             attempt = try_num;
             if try_num > 1 {
-                let delay = retry_delay * 2u64.pow((try_num - 2) as u32);
+                let delay = retry_delay * 2u64.pow((try_num - 2));
                 println!("STEP {}: retry {} after {}ms", step.run, try_num, delay);
                 thread::sleep(Duration::from_millis(delay));
             }
@@ -306,11 +306,11 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
                     println!("[DEBUG] Echo plugin run_with_buffer fn ptr: {:p}", run_with_buffer as *const ());
                     let mut buffer = vec![0u8; 4096];
                     let written = unsafe { run_with_buffer(&input, buffer.as_mut_ptr() as *mut i8, buffer.len()) };
-                    println!("[DEBUG] Echo plugin run_with_buffer wrote {} bytes", written);
+                    println!("[DEBUG] Echo plugin run_with_buffer wrote {written} bytes");
                     println!("[DEBUG] Echo plugin run_with_buffer buffer bytes: {:?}", &buffer[..std::cmp::min(written, 32)]);
                     if written > 0 && written < buffer.len() {
                         let s = String::from_utf8_lossy(&buffer[..written]).to_string();
-                        println!("[DEBUG] Echo plugin run_with_buffer output: {}", s);
+                        println!("[DEBUG] Echo plugin run_with_buffer output: {s}");
                         output = Some(s.clone());
                         outputs.insert(node_id.clone(), s);
                     } else {
@@ -344,7 +344,7 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
                                 runner: step.run.clone(),
                                 input: params.clone(),
                                 output: None,
-                                error: Some(format!("Failed to write cache: {}", e)),
+                                error: Some(format!("Failed to write cache: {e}")),
                                 attempt,
                                 input_type: None,
                                 output_type: None,
@@ -400,7 +400,7 @@ fn substitute_params(params: &mut serde_yaml::Value, outputs: &HashMap<String, S
 fn substitute_vars(s: &str, outputs: &HashMap<String, String>) -> String {
     let mut result = s.to_string();
     for (k, v) in outputs {
-        let var = format!("${{{}.output}}", k);
+        let var = format!("${{{k}.output}}");
         if result.contains(&var) {
             result = result.replace(&var, v);
         }
@@ -411,7 +411,7 @@ fn substitute_vars(s: &str, outputs: &HashMap<String, String>) -> String {
 fn build_plugin_input(params: &serde_yaml::Value) -> PluginInput {
     // For now, if there's an 'input' key, use it as text. Extend as needed.
     if let Some(map) = params.as_mapping() {
-        if let Some(val) = map.get(&serde_yaml::Value::from("input")) {
+        if let Some(val) = map.get(serde_yaml::Value::from("input")) {
             if let Some(s) = val.as_str() {
                 match CString::new(s) {
                     Ok(cstr) => return PluginInput { text: cstr.into_raw() },

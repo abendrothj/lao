@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json --watch",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "lint": "eslint src --ext .js,.ts,.svelte",
+    "format": "prettier --write ."
   },
   "license": "MIT",
   "dependencies": {
@@ -26,6 +28,8 @@
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "prettier": "^3.0.0",
+    "eslint": "^8.0.0"
   }
 }

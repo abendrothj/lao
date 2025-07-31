@@ -33,7 +33,7 @@ fn main() {
             if dry_run {
                 match load_workflow_yaml(&path) {
                     Ok(workflow) => {
-                        let plugin_registry = PluginRegistry::dynamic_registry("plugins/");
+                        let plugin_registry = PluginRegistry::dynamic_registry("../plugins/");
                         println!("[DRY RUN] Workflow: {}", workflow.workflow);
                         for (i, step) in workflow.steps.iter().enumerate() {
                             let plugin = plugin_registry.get(&step.run);
@@ -49,7 +49,7 @@ fn main() {
                         }
                     }
                     Err(e) => {
-                        eprintln!("[DRY RUN] Failed to load workflow: {}", e);
+                        eprintln!("[DRY RUN] Failed to load workflow: {e}");
                         std::process::exit(1);
                     }
                 }
@@ -62,7 +62,7 @@ fn main() {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Workflow execution failed: {}", e);
+                        eprintln!("Workflow execution failed: {e}");
                         std::process::exit(1);
                     }
                 }
@@ -71,29 +71,29 @@ fn main() {
         Commands::Validate { path } => {
             match load_workflow_yaml(&path) {
                 Ok(workflow) => {
-                    let plugin_registry = PluginRegistry::dynamic_registry("plugins/");
+                    let plugin_registry = PluginRegistry::dynamic_registry("../plugins/");
                     let dag = lao_orchestrator_core::build_dag(&workflow.steps).unwrap();
                     let errors = lao_orchestrator_core::validate_workflow_types(&dag, &plugin_registry);
                     if errors.is_empty() {
                         println!("Validation passed: all steps and plugins available.");
                     } else {
                         for (step, msg) in errors {
-                            println!("Step {}: {}", step, msg);
+                            println!("Step {step}: {msg}");
                         }
                         std::process::exit(1);
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to load workflow: {}", e);
+                    eprintln!("Failed to load workflow: {e}");
                     std::process::exit(1);
                 }
             }
         }
         Commands::PluginList => {
-            let plugin_registry = PluginRegistry::dynamic_registry("plugins/");
+            let plugin_registry = PluginRegistry::dynamic_registry("../plugins/");
             println!("Available plugins:");
-            for (name, _plugin) in &plugin_registry.plugins {
-                println!("- {}", name);
+            for name in plugin_registry.plugins.keys() {
+                println!("- {name}");
             }
         }
     }

@@ -34,6 +34,12 @@ pub struct PluginRegistry {
     pub plugins: HashMap<String, LoadedPlugin>,
 }
 
+impl Default for PluginRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PluginRegistry {
     pub fn new() -> Self {
         Self { plugins: HashMap::new() }
@@ -85,7 +91,7 @@ impl PluginRegistry {
                         }
                     })
                     .collect::<String>();
-                let plugin_dir = std::path::Path::new(&plugins_dir).join(format!("{}Plugin", cap));
+                let plugin_dir = std::path::Path::new(&plugins_dir).join(format!("{cap}Plugin"));
                 let manifest_path = plugin_dir.join("plugin.yaml");
                 println!("[DIAG] Checking manifest at: {}", manifest_path.canonicalize().unwrap_or(manifest_path.clone()).display());
                 let manifest_str = match fs::read_to_string(&manifest_path) {
@@ -105,13 +111,21 @@ impl PluginRegistry {
                 let required_fields = ["name", "version", "description", "input", "output"];
                 let mut missing = Vec::new();
                 for field in &required_fields {
-                    if !manifest.get(*field).is_some() {
+                    if manifest.get(*field).is_none() {
                         missing.push(*field);
                     }
                 }
                 if !missing.is_empty() {
                     println!("[DIAG] Skipping {}: manifest {} missing fields {:?}", path.display(), manifest_path.display(), missing);
                     continue;
+                }
+                // Check for compatible_core field
+                let compatible_core = manifest.get("compatible_core").and_then(|v| v.as_str());
+                let orchestrator_version = env!("CARGO_PKG_VERSION");
+                if let Some(core_req) = compatible_core {
+                    if core_req != orchestrator_version {
+                        println!("[WARN] Plugin {:?} (version {:?}) is for core {} but orchestrator is {}. May be incompatible.", manifest.get("name"), manifest.get("version"), core_req, orchestrator_version);
+                    }
                 }
                 unsafe {
                     match Library::new(&path) {

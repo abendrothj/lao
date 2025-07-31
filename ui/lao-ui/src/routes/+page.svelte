@@ -3,6 +3,7 @@
   import { mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
   import { dndzone } from "svelte-dnd-action";
   import { onMount } from "svelte";
+  import VisualGraphEditor from "../components/VisualGraphEditor.svelte";
 
   let name = $state("");
   let greetMsg = $state("");
@@ -14,6 +15,7 @@
   let newNodeName = $state("");
   let newNodeType = $state("Echo");
   let yamlExport = $state("");
+  let newWorkflowFilename = $state("new_workflow.yaml");
 
   // Drag-and-drop state
   let dndNodes = $state([]);
@@ -113,11 +115,32 @@ steps:
       genError = e.message || e;
     }
   }
+
+  function newWorkflow() {
+    graph = { nodes: [], edges: [] };
+    error = "";
+    workflowPath = "";
+    yamlExport = "";
+  }
+
+  async function saveWorkflowAsYaml(filename) {
+    if (!graph) return;
+    let yaml = `workflow: "Visual Flow"\nsteps:\n`;
+    for (const node of graph.nodes) {
+      yaml += `  - run: ${node.run}\n`;
+    }
+    try {
+      await writeTextFile(filename, yaml);
+      yamlExport = `Saved to ${filename}`;
+    } catch (e) {
+      yamlExport = `Error saving: ${e.message || e}`;
+    }
+  }
 </script>
 
 <main class="container">
   <img src="/logo-full.png" alt="LAO Logo" class="lao-logo" />
-  <form class="row" onsubmit={greet}>
+  <form class="row" on:submit={greet}>
     <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
     <button type="submit">Greet</button>
   </form>
@@ -126,7 +149,7 @@ steps:
   <section style="margin-top: 2em;">
     <h2>Prompt-Driven Workflow</h2>
     <input placeholder="Describe your workflow (e.g. 'Summarize this audio and tag action items')" bind:value={prompt} style="width: 60%;" />
-    <button onclick={generateWorkflowFromPrompt}>Generate Workflow</button>
+    <button on:click={generateWorkflowFromPrompt}>Generate Workflow</button>
     {#if genError}
       <p style="color: red;">{genError}</p>
     {/if}
@@ -158,22 +181,15 @@ steps:
 
   <section style="margin-top: 2em;">
     <h2>Visual Flow Builder</h2>
+    <button on:click={newWorkflow}>New Workflow</button>
     <input placeholder="Workflow YAML path..." bind:value={workflowPath} />
-    <button onclick={loadGraph}>Load Workflow</button>
+    <button on:click={loadGraph}>Load Workflow</button>
     {#if error}
       <p style="color: red;">{error}</p>
     {/if}
     {#if graph}
       <div style="margin-top: 1em;">
-        <h3>Nodes (Drag to Reorder)</h3>
-        <ul use:dndzone={{ items: dndNodes, flipDurationMs: 200 }} onconsider={handleDnd} onfinalize={handleDnd}>
-          {#each dndNodes as node (node.id)}
-            <li class="dnd-node">
-              <b>{node.id}</b>: {node.run} (<i>{node.status}</i>)
-              <button onclick={() => removeNode(node.id)}>Remove</button>
-            </li>
-          {/each}
-        </ul>
+        <VisualGraphEditor {graph} on:updateGraph={e => graph = e.detail} />
         <h3>Add Node</h3>
         <input placeholder="Node name (optional)" bind:value={newNodeName} />
         <select bind:value={newNodeType}>
@@ -181,14 +197,11 @@ steps:
           <option>Whisper</option>
           <option>Ollama</option>
         </select>
-        <button onclick={addNode}>Add Node</button>
-        <h3>Edges</h3>
-        <ul>
-          {#each graph.edges as edge}
-            <li>{edge.from} → {edge.to}</li>
-          {/each}
-        </ul>
-        <button onclick={exportYAML}>Export as YAML</button>
+        <button on:click={addNode}>Add Node</button>
+        <h3>Export/Save Workflow</h3>
+        <input placeholder="Filename (e.g. new_workflow.yaml)" bind:value={newWorkflowFilename} />
+        <button on:click={() => saveWorkflowAsYaml(newWorkflowFilename)}>Save as YAML</button>
+        <button on:click={exportYAML}>Export as YAML (Preview)</button>
         {#if yamlExport}
           <pre>{yamlExport}</pre>
         {/if}
@@ -382,5 +395,35 @@ button {
 }
 .log-entry {
   margin-bottom: 0.25em;
+}
+.modal-backdrop {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal {
+  background: #fff;
+  color: #222;
+  border-radius: 12px;
+  padding: 2em 2.5em;
+  max-width: 480px;
+  box-shadow: 0 4px 32px rgba(0,0,0,0.25);
+  text-align: center;
+}
+.demo-video-placeholder {
+  width: 100%;
+  height: 180px;
+  background: #eee;
+  color: #888;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  margin-bottom: 1em;
+  margin-top: 0.5em;
 }
 </style>

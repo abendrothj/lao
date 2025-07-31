@@ -1,0 +1,12 @@
+[package]
+name = "plugin-template"
+version = "0.1.0"
+edition = "2021"
+description = "A template for LAO plugins. Rename and update for your plugin."
+authors = ["Your Name <you@example.com>"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+lao_plugin_api = { path = "../../lao_plugin_api" } 

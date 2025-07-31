@@ -1,0 +1,6 @@
+name: plugin-template
+version: 0.1.0
+description: "A template for LAO plugins. Update this for your plugin."
+input: string
+output: string 
+compatible_core: "0.1.0" 

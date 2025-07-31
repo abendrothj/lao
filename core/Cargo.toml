@@ -27,7 +27,8 @@ lao_plugin_api = { path = "../lao_plugin_api" }
 name = "test_runner"
 path = "test_runner.rs"
 
-[[bin]]
-name = "comprehensive_lao"
-path = "tests/comprehensive_lao.rs"
+[dev-dependencies]
+clippy = "*"
+rustfmt = "*"
+serial_test = "2.0"
 

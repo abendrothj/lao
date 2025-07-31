@@ -36,3 +36,11 @@ pub extern "C" fn plugin_entry_point() -> *mut dyn LaoPlugin {
 ## Using Plugins in Workflows
 Reference the plugin by name in your workflow YAML:
 ```
+```
+
+## Plugin Reference
+
+- [EchoPlugin](../plugins/EchoPlugin/README.md)
+- [SummarizerPlugin](../plugins/SummarizerPlugin/README.md)
+- [PromptDispatcherPlugin](../plugins/PromptDispatcherPlugin/README.md)
+- [WhisperPlugin](../plugins/WhisperPlugin/README.md)

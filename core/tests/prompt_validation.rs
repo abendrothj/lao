@@ -1,4 +1,5 @@
-use lao_orchestrator_core::plugins::{PluginRegistry, PluginInput, PluginOutput};
+use lao_orchestrator_core::plugins::PluginRegistry;
+use lao_plugin_api::{PluginInput, PluginOutput};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
@@ -13,15 +14,16 @@ fn normalize_yaml(yaml: &str) -> serde_yaml::Value {
     serde_yaml::from_str(yaml).unwrap_or(serde_yaml::Value::Null)
 }
 
+#[test]
 fn test_missing_plugin_manifest() {
-    let plugin_dir = "../../plugins/EchoPlugin";
+    let plugin_dir = "../plugins/EchoPlugin";
     let manifest_path = std::path::Path::new(plugin_dir).join("plugin.yaml");
     let orig = std::fs::read_to_string(&manifest_path).ok();
     // Temporarily remove manifest
     if manifest_path.exists() {
         std::fs::rename(&manifest_path, manifest_path.with_extension("bak")).unwrap();
     }
-    let mut registry = lao_orchestrator_core::plugins::PluginRegistry::dynamic_registry("../../plugins/");
+    let mut registry = lao_orchestrator_core::plugins::PluginRegistry::dynamic_registry("../plugins/");
     assert!(registry.get("Echo").is_none(), "Plugin should not load without manifest");
     // Restore manifest
     if let Some(orig) = orig {
@@ -31,12 +33,13 @@ fn test_missing_plugin_manifest() {
     }
 }
 
+#[test]
 fn test_malformed_plugin_manifest() {
-    let plugin_dir = "../../plugins/EchoPlugin";
+    let plugin_dir = "../plugins/EchoPlugin";
     let manifest_path = std::path::Path::new(plugin_dir).join("plugin.yaml");
     let orig = std::fs::read_to_string(&manifest_path).ok();
     std::fs::write(&manifest_path, "not: yaml: [").unwrap();
-    let mut registry = lao_orchestrator_core::plugins::PluginRegistry::dynamic_registry("../../plugins/");
+    let mut registry = lao_orchestrator_core::plugins::PluginRegistry::dynamic_registry("../plugins/");
     assert!(registry.get("Echo").is_none(), "Plugin should not load with malformed manifest");
     // Restore manifest
     if let Some(orig) = orig {
@@ -44,6 +47,7 @@ fn test_malformed_plugin_manifest() {
     }
 }
 
+#[test]
 fn test_invalid_workflow_step() {
     let workflow = lao_orchestrator_core::Workflow {
         workflow: "Invalid Step".to_string(),
@@ -58,60 +62,46 @@ fn test_invalid_workflow_step() {
         }],
     };
     let dag = lao_orchestrator_core::build_dag(&workflow.steps).unwrap();
-    let registry = lao_orchestrator_core::plugins::PluginRegistry::dynamic_registry("../../plugins/");
+    let registry = lao_orchestrator_core::plugins::PluginRegistry::dynamic_registry("../plugins/");
     let errors = lao_orchestrator_core::validate_workflow_types(&dag, &registry);
     assert!(!errors.is_empty(), "Should report error for missing plugin");
 }
 
+#[test]
 fn test_prompt_to_workflow_failure() {
-    let mut registry = lao_orchestrator_core::plugins::PluginRegistry::dynamic_registry("../../plugins/");
-    let dispatcher = registry.get_mut("PromptDispatcher").expect("PromptDispatcherPlugin not found");
-    let input = lao_orchestrator_core::plugins::PluginInput::Text("nonsense input that should fail".to_string());
-    let result = dispatcher.execute(input);
-    assert!(result.is_err(), "PromptDispatcher should error on nonsense input");
+    let mut registry = lao_orchestrator_core::plugins::PluginRegistry::dynamic_registry("../plugins/");
+    let dispatcher = registry.plugins.get_mut("PromptDispatcherPlugin").expect("PromptDispatcherPlugin not found");
+    let input = lao_plugin_api::PluginInput { text: std::ffi::CString::new("nonsense input that should fail").unwrap().into_raw() };
+    let result = unsafe { ((*dispatcher.vtable).run)(&input) };
+    let c_str = unsafe { std::ffi::CStr::from_ptr(result.text) };
+    let output = c_str.to_string_lossy().to_string();
+    unsafe { ((*dispatcher.vtable).free_output)(result) };
+    assert!(output.contains("error") || output.is_empty(), "PromptDispatcher should error on nonsense input");
 }
 
-fn main() {
-    let path = "../prompt_dispatcher/prompt/prompt_library.json";
-    let data = fs::read_to_string(path).expect("Failed to read prompt_library.json");
+#[test]
+fn test_prompt_library_pairs() {
+    let path = "./prompt_dispatcher/prompt/prompt_library.json";
+    let data = std::fs::read_to_string(path).expect("Failed to read prompt_library.json");
     let pairs: Vec<PromptPair> = serde_json::from_str(&data).expect("Failed to parse prompt_library.json");
-    let mut registry = PluginRegistry::default_registry();
-    let dispatcher = registry.get_mut("PromptDispatcher").expect("PromptDispatcherPlugin not found");
-    let mut passed = 0;
+    let mut registry = PluginRegistry::dynamic_registry("../plugins/");
+    let dispatcher = registry.plugins.get_mut("PromptDispatcherPlugin").expect("PromptDispatcherPlugin not found");
     let mut failed = 0;
     for (i, pair) in pairs.iter().enumerate() {
         println!("\nTest {}: {}", i + 1, pair.prompt);
-        let result = dispatcher.execute(PluginInput::Text(pair.prompt.clone()));
-        match result {
-            Ok(PluginOutput::Text(generated)) => {
-                let expected_norm = normalize_yaml(&pair.workflow);
-                let generated_norm = normalize_yaml(&generated);
-                if expected_norm == generated_norm {
-                    println!("  ✅ PASS");
-                    passed += 1;
-                } else {
-                    println!("  ❌ FAIL");
-                    println!("  Expected:\n{}", pair.workflow);
-                    println!("  Got:\n{}", generated);
-                    failed += 1;
-                }
-            }
-            Ok(_) => {
-                println!("  ❌ FAIL: Dispatcher did not return YAML text");
-                failed += 1;
-            }
-            Err(e) => {
-                println!("  ❌ FAIL: Dispatcher error: {:?}", e);
-                failed += 1;
-            }
+        let input = lao_plugin_api::PluginInput { text: std::ffi::CString::new(pair.prompt.clone()).unwrap().into_raw() };
+        let result = unsafe { ((*dispatcher.vtable).run)(&input) };
+        let c_str = unsafe { std::ffi::CStr::from_ptr(result.text) };
+        let generated = c_str.to_string_lossy().to_string();
+        unsafe { ((*dispatcher.vtable).free_output)(result) };
+        let expected_norm = normalize_yaml(&pair.workflow);
+        let generated_norm = normalize_yaml(&generated);
+        if expected_norm != generated_norm {
+            println!("  ❌ FAIL");
+            println!("  Expected:\n{}", pair.workflow);
+            println!("  Got:\n{}", generated);
+            failed += 1;
         }
     }
-    println!("\nTest Summary: {} passed, {} failed, {} total", passed, failed, passed + failed);
-    if failed > 0 {
-        std::process::exit(1);
-    }
-    test_missing_plugin_manifest();
-    test_malformed_plugin_manifest();
-    test_invalid_workflow_step();
-    test_prompt_to_workflow_failure();
+    assert_eq!(failed, 0, "Some prompt pairs failed");
 } 
