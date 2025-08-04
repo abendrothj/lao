@@ -1,9 +1,9 @@
-use lao_plugin_api::{PluginInput, PluginOutput, PluginVTable, PluginVTablePtr};
+use lao_plugin_api::{PluginInput, PluginOutput, PluginVTable, PluginVTablePtr, PluginMetadata};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
 unsafe extern "C" fn name() -> *const c_char {
-    CString::new("Echo").unwrap().into_raw()
+    CString::new("EchoPlugin").unwrap().into_raw()
 }
 
 unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
@@ -49,6 +49,42 @@ unsafe extern "C" fn run_with_buffer(input: *const PluginInput, buffer: *mut c_c
     max_copy
 }
 
+unsafe extern "C" fn get_metadata() -> PluginMetadata {
+    // Use simple static strings with proper null termination
+    static NAME: &str = "EchoPlugin\0";
+    static VERSION: &str = "1.0.0\0";
+    static DESCRIPTION: &str = "Simple echo plugin for LAO\0";
+    static AUTHOR: &str = "LAO Team\0";
+    static TAGS: &str = "[\"echo\", \"test\", \"debug\"]\0";
+    static CAPABILITIES: &str = "[{\"name\":\"echo\",\"description\":\"Echo input back as output\",\"input_type\":\"Text\",\"output_type\":\"Text\"}]\0";
+    
+    PluginMetadata {
+        name: NAME.as_ptr() as *const c_char,
+        version: VERSION.as_ptr() as *const c_char,
+        description: DESCRIPTION.as_ptr() as *const c_char,
+        author: AUTHOR.as_ptr() as *const c_char,
+        dependencies: std::ptr::null(),
+        tags: TAGS.as_ptr() as *const c_char,
+        input_schema: std::ptr::null(),
+        output_schema: std::ptr::null(),
+        capabilities: CAPABILITIES.as_ptr() as *const c_char,
+    }
+}
+
+unsafe extern "C" fn validate_input(input: *const PluginInput) -> bool {
+    if input.is_null() {
+        return false;
+    }
+    let c_str = CStr::from_ptr((*input).text);
+    let text = c_str.to_string_lossy();
+    !text.trim().is_empty() && !text.contains("not:") && !text.contains("{") && !text.contains("}")
+}
+
+unsafe extern "C" fn get_capabilities() -> *const c_char {
+    static CAPABILITIES: &str = "[{\"name\":\"echo\",\"description\":\"Echo input back as output\",\"input_type\":\"Text\",\"output_type\":\"Text\"}]\0";
+    CAPABILITIES.as_ptr() as *const c_char
+}
+
 #[no_mangle]
 pub static PLUGIN_VTABLE: PluginVTable = PluginVTable {
     version: 1,
@@ -56,6 +92,9 @@ pub static PLUGIN_VTABLE: PluginVTable = PluginVTable {
     run,
     free_output,
     run_with_buffer,
+    get_metadata,
+    validate_input,
+    get_capabilities,
 };
 
 #[no_mangle]

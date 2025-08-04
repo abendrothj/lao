@@ -75,7 +75,7 @@ fn dispatch_prompt(prompt: String) -> Result<String, String> {
     let mut registry = lao_orchestrator_core::plugins::PluginRegistry::dynamic_registry("plugins/");
     let dispatcher = registry.plugins.get_mut("PromptDispatcherPlugin").ok_or("PromptDispatcherPlugin not found")?;
     let c_prompt = std::ffi::CString::new(prompt).map_err(|e| format!("CString error: {}", e))?;
-    let input = PluginInput { text: c_prompt.as_ptr() };
+    let input = PluginInput { text: c_prompt.into_raw() };
     let output_obj = unsafe { ((*dispatcher.vtable).run)(&input) };
     let c_str = unsafe { std::ffi::CStr::from_ptr(output_obj.text) };
     let yaml = c_str.to_string_lossy().to_string();

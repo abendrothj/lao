@@ -195,7 +195,7 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            let input = PluginInput { text: c_prompt.as_ptr() };
+            let input = PluginInput { text: c_prompt.into_raw() };
             let output_obj = unsafe { ((*dispatcher.vtable).run)(&input) };
             let c_str = unsafe { std::ffi::CStr::from_ptr(output_obj.text) };
             let yaml = c_str.to_string_lossy().to_string();
@@ -260,7 +260,7 @@ fn main() {
                         continue;
                     }
                 };
-                let input = PluginInput { text: c_prompt.as_ptr() };
+                let input = PluginInput { text: c_prompt.into_raw() };
                 let output_obj = unsafe { ((*dispatcher.vtable).run)(&input) };
                 let c_str = unsafe { std::ffi::CStr::from_ptr(output_obj.text) };
                 let generated = c_str.to_string_lossy().to_string();

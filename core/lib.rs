@@ -54,8 +54,8 @@ pub struct StepLog {
     pub output: Option<String>,
     pub error: Option<String>,
     pub attempt: u32,
-    pub input_type: Option<plugins::PluginInputType>,
-    pub output_type: Option<plugins::PluginInputType>,
+    pub input_type: Option<lao_plugin_api::PluginInputType>,
+    pub output_type: Option<lao_plugin_api::PluginOutputType>,
     pub validation: Option<String>,
 }
 
@@ -159,7 +159,7 @@ pub fn validate_workflow_types(
 ) -> Vec<(usize, String)> {
     let mut errors = Vec::new();
     for (i, node) in dag.iter().enumerate() {
-        if let Some(plugin) = plugin_registry.get(&node.step.run) {
+        if let Some(_plugin) = plugin_registry.get(&node.step.run) {
             // Basic validation: check if plugin exists
             // In a real implementation, you'd validate input/output types
         } else {
@@ -207,7 +207,7 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
         let max_attempts = step.retries.unwrap_or(1) + 1;
         
         for attempt in 1..=max_attempts {
-            let attempt_start = Instant::now();
+            let _attempt_start = Instant::now();
             
             // Check cache first
             let mut cache_status = None;
@@ -301,7 +301,7 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
         }
     }
     
-    let duration = start_time.elapsed();
+    let _duration = start_time.elapsed();
     Ok(logs)
 }
 

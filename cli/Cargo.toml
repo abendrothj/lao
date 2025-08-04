@@ -2,17 +2,28 @@
 name = "lao-cli"
 version = "0.1.0"
 edition = "2021"
+description = "Command-line interface for LAO - Local AI Orchestrator"
 authors = ["LAO Contributors"]
-description = "Dedicated CLI for LAO Orchestrator"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
-log = "0.4"
-serde = { version = "1", features = ["derive"] }
+clap = { version = "4.0", features = ["derive"] }
+lao-orchestrator-core = { path = "../core" }
+lao_plugin_api = { path = "../lao_plugin_api" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 serde_yaml = "0.9"
-serde_json = "1"
-lao-orchestrator-core = { path = "../core" } 
-lao_plugin_api = { path = "../lao_plugin_api" } 
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+anyhow = "1.0"
+thiserror = "1.0"
+indicatif = "0.17"
+console = "0.15"
+dialoguer = "0.11"
+tempfile = "3.0"
+zip = "0.6"
+tar = "0.4"
+flate2 = "1.0"
+walkdir = "2.3"
 
 [[bin]]
 name = "lao-cli"

@@ -1,0 +1,20 @@
+[package]
+name = "lao-plugin-registry"
+version = "0.1.0"
+edition = "2021"
+description = "LAO Plugin Registry Server"
+authors = ["LAO Contributors"]
+
+[dependencies]
+actix-web = "4.0"
+actix-cors = "0.6"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+env_logger = "0.10"
+log = "0.4"
+
+[[bin]]
+name = "lao-plugin-registry"
+path = "src/main.rs" 

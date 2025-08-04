@@ -1,0 +1,8 @@
+workflow: Invalid Step
+steps:
+- run: Echo
+  retries: null
+  retry_delay: null
+  cache_key: null
+  input_from: null
+  depends_on: null

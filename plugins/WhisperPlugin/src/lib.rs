@@ -1,4 +1,4 @@
-use lao_plugin_api::{PluginInput, PluginOutput, PluginVTable, PluginVTablePtr};
+use lao_plugin_api::{PluginInput, PluginOutput, PluginVTable, PluginVTablePtr, PluginMetadata};
 use std::ffi::{CStr, CString};
 use std::process::Command;
 use std::os::raw::c_char;
@@ -40,6 +40,42 @@ unsafe extern "C" fn run_with_buffer(_input: *const lao_plugin_api::PluginInput,
     0 // Not implemented for WhisperPlugin
 }
 
+unsafe extern "C" fn get_metadata() -> PluginMetadata {
+    // Use static byte arrays to ensure proper memory management
+    static NAME: &[u8] = b"WhisperPlugin\0";
+    static VERSION: &[u8] = b"1.0.0\0";
+    static DESCRIPTION: &[u8] = b"Whisper speech-to-text plugin for LAO\0";
+    static AUTHOR: &[u8] = b"LAO Team\0";
+    static TAGS: &[u8] = b"[\"speech\", \"whisper\", \"audio\", \"transcription\"]\0";
+    static CAPABILITIES: &[u8] = b"[{\"name\":\"speech-to-text\",\"description\":\"Convert speech to text using Whisper\",\"input_type\":\"Text\",\"output_type\":\"Text\"}]\0";
+    
+    PluginMetadata {
+        name: NAME.as_ptr() as *const c_char,
+        version: VERSION.as_ptr() as *const c_char,
+        description: DESCRIPTION.as_ptr() as *const c_char,
+        author: AUTHOR.as_ptr() as *const c_char,
+        dependencies: std::ptr::null(),
+        tags: TAGS.as_ptr() as *const c_char,
+        input_schema: std::ptr::null(),
+        output_schema: std::ptr::null(),
+        capabilities: CAPABILITIES.as_ptr() as *const c_char,
+    }
+}
+
+unsafe extern "C" fn validate_input(input: *const PluginInput) -> bool {
+    if input.is_null() {
+        return false;
+    }
+    let c_str = CStr::from_ptr((*input).text);
+    let text = c_str.to_string_lossy();
+    !text.trim().is_empty()
+}
+
+unsafe extern "C" fn get_capabilities() -> *const c_char {
+    static CAPABILITIES: &[u8] = b"[{\"name\":\"speech-to-text\",\"description\":\"Convert speech to text using Whisper\",\"input_type\":\"Text\",\"output_type\":\"Text\"}]\0";
+    CAPABILITIES.as_ptr() as *const c_char
+}
+
 #[no_mangle]
 pub static PLUGIN_VTABLE: lao_plugin_api::PluginVTable = lao_plugin_api::PluginVTable {
     version: 1,
@@ -47,6 +83,9 @@ pub static PLUGIN_VTABLE: lao_plugin_api::PluginVTable = lao_plugin_api::PluginV
     run,
     free_output,
     run_with_buffer,
+    get_metadata,
+    validate_input,
+    get_capabilities,
 };
 
 #[no_mangle]

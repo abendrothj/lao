@@ -1,0 +1,9 @@
+workflow: Echo Test
+steps:
+- run: Echo
+  input: Hello, LAO!
+  retries: 1
+  retry_delay: null
+  cache_key: null
+  input_from: null
+  depends_on: null

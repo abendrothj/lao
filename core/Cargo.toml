@@ -31,4 +31,5 @@ path = "test_runner.rs"
 clippy = "*"
 rustfmt = "*"
 serial_test = "2.0"
+memoffset = "0.9"
 
