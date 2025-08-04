@@ -6,7 +6,8 @@ description = "Generates a workflow plan from a prompt using a local LLM (Ollama
 authors = ["LAO Contributors"]
 
 [dependencies]
-lao_plugin_api = { path = "../../lao_plugin_api" } 
+lao_plugin_api = { path = "../../lao_plugin_api" }
+serde_json = "1.0"
 
 [lib]
 crate-type = ["cdylib"] 

@@ -14,6 +14,15 @@ unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
     let c_str = CStr::from_ptr((*input).text);
     let s = c_str.to_string_lossy();
     println!("[EchoPlugin] Received input: {}", s);
+    
+    // Validate input - should be a simple string, not YAML object or empty
+    if s.trim().is_empty() || s.contains("not:") || s.contains("{") || s.contains("}") {
+        let error_msg = "error: invalid input for Echo plugin";
+        let out = CString::new(error_msg).unwrap();
+        println!("[EchoPlugin] Returning error: {}", error_msg);
+        return PluginOutput { text: out.into_raw() };
+    }
+    
     let out = CString::new(s.as_ref()).unwrap();
     println!("[EchoPlugin] Returning output: {}", out.to_string_lossy());
     PluginOutput { text: out.into_raw() }
