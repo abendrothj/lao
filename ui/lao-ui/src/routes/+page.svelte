@@ -3,6 +3,7 @@
   import { mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
   import { dndzone } from "svelte-dnd-action";
   import { onMount } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
   import VisualGraphEditor from "../components/VisualGraphEditor.svelte";
 
   let name = $state("");
@@ -16,6 +17,9 @@
   let newNodeType = $state("Echo");
   let yamlExport = $state("");
   let newWorkflowFilename = $state("new_workflow.yaml");
+  let plugins = $state([]);
+  let selectedNode = $state(null);
+  let yamlText = $state("");
 
   // Drag-and-drop state
   let dndNodes = $state([]);
@@ -29,15 +33,35 @@
 
   // Live logs
   let liveLogs = $state([]);
-  let logInterval;
-  onMount(() => {
-    // Mock: poll logs every second (replace with backend event subscription)
-    logInterval = setInterval(() => {
-      // Simulate log update
-      liveLogs = [...liveLogs, `Log entry at ${new Date().toLocaleTimeString()}`];
-      if (liveLogs.length > 20) liveLogs.shift();
-    }, 1000);
-    return () => clearInterval(logInterval);
+  let unlistenStatus;
+  let unlistenDone;
+  onMount(async () => {
+    unlistenStatus = await listen("workflow:status", ({ payload }) => {
+      liveLogs = [...liveLogs, JSON.stringify(payload)];
+      if (liveLogs.length > 200) liveLogs.shift();
+    });
+    unlistenDone = await listen("workflow:done", ({ payload }) => {
+      liveLogs = [...liveLogs, `DONE: ${JSON.stringify(payload)}`];
+    });
+    try {
+      const list = await invoke("list_plugins_for_ui");
+      // Defensive: ensure array and non-empty; if empty, retry after short delay once (backend may still be initializing)
+      if (Array.isArray(list) && list.length > 0) {
+        plugins = list;
+      } else {
+        setTimeout(async () => {
+          try {
+            const list2 = await invoke("list_plugins_for_ui");
+            if (Array.isArray(list2)) plugins = list2;
+          } catch (err) {
+            console.error("Plugin list retry failed", err);
+          }
+        }, 500);
+      }
+    } catch (e) {
+      console.error("Failed to load plugins", e);
+    }
+    return () => { if (unlistenStatus) unlistenStatus(); if (unlistenDone) unlistenDone(); };
   });
 
   // Prompt-driven workflow state
@@ -72,6 +96,17 @@
     newNodeType = "Echo";
   }
 
+  async function runWorkflow(parallel = false) {
+    if (!workflowPath) { error = "Set a workflow path first"; return; }
+    error = "";
+    liveLogs = [];
+    try {
+      await invoke("run_workflow_stream", { path: workflowPath, parallel });
+    } catch (e) {
+      error = e.message || e;
+    }
+  }
+
   function removeNode(id) {
     if (!graph) return;
     graph.nodes = graph.nodes.filter(n => n.id !== id);
@@ -88,6 +123,7 @@ steps:
 `;
     }
     yamlExport = yaml;
+    yamlText = yaml;
   }
 
   async function generateWorkflowFromPrompt() {
@@ -132,15 +168,43 @@ steps:
     try {
       await writeTextFile(filename, yaml);
       yamlExport = `Saved to ${filename}`;
+      yamlText = yaml;
     } catch (e) {
       yamlExport = `Error saving: ${e.message || e}`;
+    }
+  }
+
+  function onSelectNode(e) {
+    selectedNode = e.detail.node;
+  }
+
+  function updateSelectedNodeRun(newRun) {
+    if (!graph || !selectedNode) return;
+    const n = graph.nodes.find(n => n.id === selectedNode.id);
+    if (n) n.run = newRun;
+  }
+
+  function removeSelectedNode() {
+    if (!selectedNode) return;
+    removeNode(selectedNode.id);
+    selectedNode = null;
+  }
+
+  function importYAML() {
+    try {
+      const lines = yamlText.split(/\r?\n/);
+      const runs = lines.filter(l => l.trim().startsWith("- run:")).map(l => l.split(":")[1].trim());
+      graph = { nodes: runs.map((r, i) => ({ id: `step${i+1}`, run: r, status: "pending" })), edges: [] };
+      error = "";
+    } catch (e) {
+      error = `Failed to import YAML: ${e.message || e}`;
     }
   }
 </script>
 
 <main class="container">
   <img src="/logo-full.png" alt="LAO Logo" class="lao-logo" />
-  <form class="row" on:submit={greet}>
+  <form class="row" onsubmit={greet}>
     <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
     <button type="submit">Greet</button>
   </form>
@@ -149,7 +213,7 @@ steps:
   <section style="margin-top: 2em;">
     <h2>Prompt-Driven Workflow</h2>
     <input placeholder="Describe your workflow (e.g. 'Summarize this audio and tag action items')" bind:value={prompt} style="width: 60%;" />
-    <button on:click={generateWorkflowFromPrompt}>Generate Workflow</button>
+    <button onclick={generateWorkflowFromPrompt}>Generate Workflow</button>
     {#if genError}
       <p style="color: red;">{genError}</p>
     {/if}
@@ -181,30 +245,59 @@ steps:
 
   <section style="margin-top: 2em;">
     <h2>Visual Flow Builder</h2>
-    <button on:click={newWorkflow}>New Workflow</button>
+    <button onclick={newWorkflow}>New Workflow</button>
     <input placeholder="Workflow YAML path..." bind:value={workflowPath} />
-    <button on:click={loadGraph}>Load Workflow</button>
+    <button onclick={loadGraph}>Load Workflow</button>
+    <button onclick={() => runWorkflow(false)}>Run</button>
+    <button onclick={() => runWorkflow(true)}>Run (Parallel)</button>
     {#if error}
       <p style="color: red;">{error}</p>
     {/if}
     {#if graph}
       <div style="margin-top: 1em;">
-        <VisualGraphEditor {graph} on:updateGraph={e => graph = e.detail} />
+        <VisualGraphEditor {graph} on:updateGraph={e => graph = e.detail} on:selectNode={onSelectNode} />
+        {#if selectedNode}
+          <div style="margin: 1em auto; max-width: 640px; text-align: left;">
+            <h3>Node Inspector</h3>
+            <div class="dnd-node">
+              <div>
+                <div><b>ID:</b> {selectedNode.id}</div>
+                <div>
+                  <label><b>Run:</b></label>
+                  <select bind:value={selectedNode.run} onchange={(e) => updateSelectedNodeRun(e.target.value)}>
+                    {#each plugins as p}
+                      <option value={p.name}>{p.name}</option>
+                    {/each}
+                  </select>
+                </div>
+                <button onclick={removeSelectedNode}>Remove Node</button>
+              </div>
+            </div>
+          </div>
+        {/if}
         <h3>Add Node</h3>
         <input placeholder="Node name (optional)" bind:value={newNodeName} />
         <select bind:value={newNodeType}>
-          <option>Echo</option>
-          <option>Whisper</option>
-          <option>Ollama</option>
+          {#if plugins && plugins.length}
+            {#each plugins as p}
+              <option value={p.name}>{p.name}</option>
+            {/each}
+          {:else}
+            <option disabled selected>Loading plugins...</option>
+          {/if}
         </select>
-        <button on:click={addNode}>Add Node</button>
-        <h3>Export/Save Workflow</h3>
+        <button onclick={addNode}>Add Node</button>
+        <h3>Export/Import Workflow</h3>
         <input placeholder="Filename (e.g. new_workflow.yaml)" bind:value={newWorkflowFilename} />
-        <button on:click={() => saveWorkflowAsYaml(newWorkflowFilename)}>Save as YAML</button>
-        <button on:click={exportYAML}>Export as YAML (Preview)</button>
+        <button onclick={() => saveWorkflowAsYaml(newWorkflowFilename)}>Save as YAML</button>
+        <button onclick={exportYAML}>Export as YAML (Preview)</button>
         {#if yamlExport}
           <pre>{yamlExport}</pre>
         {/if}
+        <div style="margin-top: 1em;">
+          <textarea rows="8" style="width:100%;" bind:value={yamlText} placeholder="Paste YAML here..."></textarea>
+          <button onclick={importYAML}>Import YAML</button>
+        </div>
       </div>
     {/if}
   </section>

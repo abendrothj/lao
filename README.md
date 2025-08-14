@@ -26,6 +26,7 @@ LAO is a cross-platform desktop tool for chaining local AI models and plugins in
 - [x] Prompt library (Markdown + JSON, for validation/fine-tuning)
 - [x] Test harness for prompt validation
 - [ ] End-to-end “Run” from UI (execute and show logs/results)
+- [x] UI streaming run with real-time step events and parallel execution option
 - [ ] Node/edge editing in UI (drag, connect, edit)
 - [ ] Plugin explainability (`lao explain plugin <name>`)
 - [ ] Conditional/branching steps

@@ -7,6 +7,7 @@
   let offset = { x: 0, y: 0 };
   let localGraph = { nodes: [], edges: [] };
   const gridSize = 40;
+  let sourceForEdge = null;
 
   $: localGraph = graph ? JSON.parse(JSON.stringify(graph)) : { nodes: [], edges: [] };
 
@@ -46,6 +47,38 @@
     dispatch('updateGraph', { ...localGraph });
   }
 
+  function onNodeClick(e, node) {
+    // Shift-click to connect nodes
+    if (e.shiftKey) {
+      if (!sourceForEdge) {
+        sourceForEdge = node.id;
+      } else if (sourceForEdge !== node.id) {
+        const exists = (localGraph.edges || []).some(ed => ed.from === sourceForEdge && ed.to === node.id);
+        if (!exists) {
+          localGraph.edges = [...(localGraph.edges || []), { from: sourceForEdge, to: node.id }];
+          dispatch('updateGraph', { ...localGraph });
+        }
+        sourceForEdge = null;
+      } else {
+        sourceForEdge = null;
+      }
+    }
+    // Normal click selects node
+    if (!e.shiftKey) {
+      dispatch('selectNode', { node });
+    }
+  }
+
+  function statusColor(status) {
+    switch (status) {
+      case 'running': return '#1e88e5';
+      case 'success': return '#2e7d32';
+      case 'error': return '#c62828';
+      case 'cache': return '#6d4c41';
+      default: return '#222';
+    }
+  }
+
   onMount(() => {
     // Initialize node positions if not set
     if (localGraph.nodes) {
@@ -79,11 +112,11 @@
 
   <!-- Draw nodes -->
   {#each localGraph.nodes as node}
-    <g transform={`translate(${node.x ?? 100},${node.y ?? 100})`} tabindex="0">
-      <rect width="120" height="60" rx="12" fill="#222" stroke="#444" stroke-width="2"
-        on:pointerdown={(e) => onNodePointerDown(e, node)} />
-      <text x="60" y="30" fill="#fff" font-size="18" text-anchor="middle" alignment-baseline="middle">{node.id}</text>
-      <text x="60" y="48" fill="#aaa" font-size="14" text-anchor="middle" alignment-baseline="middle">{node.run}</text>
+    <g transform={`translate(${node.x ?? 100},${node.y ?? 100})`} tabindex="0" onclick={(e) => onNodeClick(e, node)}>
+      <rect width="120" height="60" rx="12" fill={statusColor(node.status)} stroke="#444" stroke-width="2"
+        onpointerdown={(e) => onNodePointerDown(e, node)} />
+      <text x="60" y="28" fill="#fff" font-size="16" text-anchor="middle" alignment-baseline="middle">{node.id}</text>
+      <text x="60" y="46" fill="#ddd" font-size="12" text-anchor="middle" alignment-baseline="middle">{node.run} ({node.status || 'pending'})</text>
     </g>
   {/each}
 </svg>

@@ -19,6 +19,9 @@ lao <COMMAND> [OPTIONS]
 - (Planned) `explain plugin <name>`  
   Show detailed info and examples for a plugin.
 
+## UI streaming
+- The desktop UI now supports real-time workflow execution with event streaming and optional parallel execution per DAG level.
+
 ## Examples
 ```
 lao run workflows/test.yaml

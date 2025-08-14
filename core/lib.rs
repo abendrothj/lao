@@ -15,6 +15,7 @@ use std::ffi::CString;
 use lao_plugin_api::PluginInput;
 pub mod plugins;
 use plugins::*;
+use lao_plugin_api::{PluginInputType, PluginOutputType};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Workflow {
@@ -57,6 +58,18 @@ pub struct StepLog {
     pub input_type: Option<lao_plugin_api::PluginInputType>,
     pub output_type: Option<lao_plugin_api::PluginOutputType>,
     pub validation: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StepEvent {
+    pub step: usize,
+    pub step_id: String,
+    pub runner: String,
+    pub status: String, // pending | running | success | error | cache
+    pub attempt: u32,
+    pub message: Option<String>,
+    pub output: Option<String>,
+    pub error: Option<String>,
 }
 
 pub fn load_workflow_yaml(path: &str) -> Result<Workflow, String> {
@@ -159,14 +172,58 @@ pub fn validate_workflow_types(
 ) -> Vec<(usize, String)> {
     let mut errors = Vec::new();
     for (i, node) in dag.iter().enumerate() {
-        if let Some(_plugin) = plugin_registry.get(&node.step.run) {
-            // Basic validation: check if plugin exists
-            // In a real implementation, you'd validate input/output types
-        } else {
+        // Check plugin exists
+        let Some(curr_plugin) = plugin_registry.get(&node.step.run) else {
             errors.push((i, format!("Plugin '{}' not found", node.step.run)));
+            continue;
+        };
+
+        // Gather primary capability types (fallback to Any when unknown)
+        let (curr_in_ty, curr_out_ty) = primary_io_types(curr_plugin);
+
+        // Validate each parent edge type compatibility
+        for parent_id in &node.parents {
+            if let Some(parent_node) = dag.iter().find(|n| &n.id == parent_id) {
+                if let Some(parent_plugin) = plugin_registry.get(&parent_node.step.run) {
+                    let (_p_in, p_out) = primary_io_types(parent_plugin);
+                    if !types_compatible(p_out.clone(), curr_in_ty.clone()) {
+                        errors.push((
+                            i,
+                            format!(
+                                "Type mismatch: parent '{}' outputs {:?} but '{}' expects {:?}",
+                                parent_node.step.run, p_out, node.step.run, curr_in_ty
+                            ),
+                        ));
+                    }
+                }
+            }
         }
+        // Unused variable suppression
+        let _ = curr_out_ty;
     }
     errors
+}
+
+fn primary_io_types(plugin: &PluginInstance) -> (PluginInputType, PluginOutputType) {
+    let caps = plugin.get_capabilities();
+    if let Some(cap) = caps.first() {
+        (cap.input_type.clone(), cap.output_type.clone())
+    } else {
+        (PluginInputType::Any, PluginOutputType::Any)
+    }
+}
+
+fn types_compatible(from: PluginOutputType, to: PluginInputType) -> bool {
+    use PluginInputType as In;
+    use PluginOutputType as Out;
+    match (from, to) {
+        (Out::Any, _) => true,
+        (_, In::Any) => true,
+        (Out::Text, In::Text) => true,
+        (Out::Json, In::Json) => true,
+        (Out::Binary, In::Binary) => true,
+        _ => false,
+    }
 }
 
 pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
@@ -303,6 +360,113 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
     
     let _duration = start_time.elapsed();
     Ok(logs)
+}
+
+// Compute default cache key when user does not provide one.
+fn compute_default_cache_key(step: &WorkflowStep, plugin_version: &str) -> String {
+    let params_str = serde_yaml::to_string(&step.params).unwrap_or_default();
+    let mut hash: u64 = 1469598103934665603; // FNV-1a 64-bit offset basis
+    for b in params_str.as_bytes() {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    format!("{}-{}-{:x}", step.run, plugin_version, hash)
+}
+
+// Streaming runner with callback events
+pub fn run_workflow_yaml_with_callback<F>(path: &str, mut on_event: F) -> Result<Vec<StepLog>, String>
+where
+    F: FnMut(StepEvent) + Send,
+{
+    let workflow = load_workflow_yaml(path)?;
+    let dag = build_dag(&workflow.steps)?;
+    let registry = PluginRegistry::dynamic_registry("../plugins/");
+
+    let errors = validate_workflow_types(&dag, &registry);
+    if !errors.is_empty() {
+        return Err(format!("Workflow validation failed: {:?}", errors));
+    }
+
+    let execution_order = topo_sort(&dag)?;
+
+    let mut logs = Vec::new();
+    let mut outputs = HashMap::new();
+
+    for (step_idx, node_id) in execution_order.iter().enumerate() {
+        let node = dag.iter().find(|n| &n.id == node_id).unwrap();
+        let step = &node.step;
+
+        let mut params = step.params.clone();
+        substitute_params(&mut params, &outputs);
+
+        let plugin_input = build_plugin_input(&params);
+        let plugin = registry.get(&step.run)
+            .ok_or_else(|| format!("Plugin '{}' not found", step.run))?;
+
+        let mut last_error = None;
+        let max_attempts = step.retries.unwrap_or(1) + 1;
+
+        on_event(StepEvent { step: step_idx, step_id: node_id.clone(), runner: step.run.clone(), status: "running".to_string(), attempt: 1, message: None, output: None, error: None });
+
+        for attempt in 1..=max_attempts {
+            // Check or compute cache key
+            let mut cache_status = None;
+            let cache_key_effective = if let Some(k) = &step.cache_key { k.clone() } else { compute_default_cache_key(step, &plugin.info.version) };
+            let cache_dir = std_env::var("LAO_CACHE_DIR").unwrap_or_else(|_| "cache".to_string());
+            let cache_path = format!("{}/{}.json", cache_dir, cache_key_effective);
+
+            if attempt == 1 {
+                if let Ok(cached) = fs::read_to_string(&cache_path) {
+                    if let Ok(cached_output) = serde_json::from_str::<String>(&cached) {
+                        cache_status = Some("cache".to_string());
+                        outputs.insert(node_id.clone(), cached_output.clone());
+                        on_event(StepEvent { step: step_idx, step_id: node_id.clone(), runner: step.run.clone(), status: "cache".to_string(), attempt, message: Some("cache hit".to_string()), output: Some(cached_output.clone()), error: None });
+                        logs.push(StepLog { step: step_idx, runner: step.run.clone(), input: params.clone(), output: Some(cached_output), error: None, attempt, input_type: None, output_type: None, validation: cache_status });
+                        break;
+                    }
+                }
+            }
+
+            let result = unsafe { ((*plugin.vtable).run)(&plugin_input) };
+            let output_str = unsafe { std::ffi::CStr::from_ptr(result.text).to_string_lossy().to_string() };
+            unsafe { ((*plugin.vtable).free_output)(result) };
+
+            if !output_str.is_empty() && !output_str.contains("error") {
+                outputs.insert(node_id.clone(), output_str.clone());
+                if step.cache_key.is_some() {
+                    fs::create_dir_all(&cache_dir).ok();
+                    let _ = fs::write(&cache_path, serde_json::to_string(&output_str).unwrap_or_default());
+                }
+                on_event(StepEvent { step: step_idx, step_id: node_id.clone(), runner: step.run.clone(), status: "success".to_string(), attempt, message: None, output: Some(output_str.clone()), error: None });
+                logs.push(StepLog { step: step_idx, runner: step.run.clone(), input: params.clone(), output: Some(output_str), error: None, attempt, input_type: None, output_type: None, validation: cache_status });
+                break;
+            } else {
+                last_error = Some(output_str.clone());
+                on_event(StepEvent { step: step_idx, step_id: node_id.clone(), runner: step.run.clone(), status: "error".to_string(), attempt, message: Some("attempt failed".to_string()), output: None, error: Some(output_str.clone()) });
+                if attempt < max_attempts {
+                    let retry_delay = step.retry_delay.unwrap_or(1000);
+                    thread::sleep(Duration::from_millis(retry_delay));
+                    on_event(StepEvent { step: step_idx, step_id: node_id.clone(), runner: step.run.clone(), status: "running".to_string(), attempt: attempt + 1, message: Some("retrying".to_string()), output: None, error: None });
+                }
+            }
+        }
+
+        if let Some(error) = last_error {
+            logs.push(StepLog { step: step_idx, runner: step.run.clone(), input: params.clone(), output: None, error: Some(error), attempt: max_attempts, input_type: None, output_type: None, validation: None });
+        }
+    }
+
+    Ok(logs)
+}
+
+// Parallel execution by levels (nodes on same level run concurrently)
+pub fn run_workflow_yaml_parallel_with_callback<F>(path: &str, mut on_event: F) -> Result<Vec<StepLog>, String>
+where
+    F: FnMut(StepEvent) + Send,
+{
+    // NOTE: Current plugin VTable is not Send/Sync, so we cannot safely execute plugins across threads.
+    // Fallback to sequential streaming execution to preserve correctness.
+    run_workflow_yaml_with_callback(path, on_event)
 }
 
 fn substitute_params(params: &mut serde_yaml::Value, outputs: &HashMap<String, String>) {

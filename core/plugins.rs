@@ -88,30 +88,21 @@ impl PluginRegistry {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_dir() {
-                    // Check for plugin.yaml manifest
-                    let manifest_path = path.join("plugin.yaml");
-                    if manifest_path.exists() {
-                        if let Ok(manifest_content) = std::fs::read_to_string(&manifest_path) {
-                            if let Ok(manifest) = serde_yaml::from_str::<serde_yaml::Value>(&manifest_content) {
-                                if let Some(name) = manifest.get("name").and_then(|n| n.as_str()) {
-                                    println!("[DIAG] Found plugin directory: {:?}", path);
-                                    println!("[DIAG] Checking manifest at: {:?}", manifest_path);
-                                    
-                                    // Look for DLL in the same directory
-                                    let dll_name = format!("{}.dll", name.to_lowercase().replace("plugin", ""));
-                                    let dll_path = path.join(&dll_name);
-                                    
-                                    if dll_path.exists() {
-                                        if let Ok(plugin) = self.load_plugin(&dll_path) {
-                                            self.register_plugin(plugin);
-                                        }
+                    // Load any shared libraries within the subdirectory (.so/.dylib/.dll)
+                    if let Ok(files) = std::fs::read_dir(&path) {
+                        for f in files.filter_map(|e| e.ok()) {
+                            let fpath = f.path();
+                            if let Some(ext) = fpath.extension().and_then(|s| s.to_str()) {
+                                if matches!(ext, "so" | "dylib" | "dll") {
+                                    if let Ok(plugin) = self.load_plugin(&fpath) {
+                                        self.register_plugin(plugin);
                                     }
                                 }
                             }
                         }
                     }
-                } else if path.extension().and_then(|s| s.to_str()) == Some("dll") {
-                    // Direct DLL loading
+                } else if matches!(path.extension().and_then(|s| s.to_str()), Some("dll") | Some("so") | Some("dylib")) {
+                    // Direct shared library loading across platforms
                     if let Ok(plugin) = self.load_plugin(&path) {
                         self.register_plugin(plugin);
                     }
