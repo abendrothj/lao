@@ -1,9 +1,0 @@
-workflow: Echo Cache Test
-steps:
-- run: Echo
-  input: Cache me!
-  retries: 2
-  retry_delay: 10
-  cache_key: echo_cache_test
-  input_from: null
-  depends_on: null
