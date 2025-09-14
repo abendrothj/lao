@@ -1,71 +1,148 @@
 # LAO: Local AI Workflow Orchestrator
 
-LAO is a Rust-based desktop application with a Tauri frontend that orchestrates local AI models through a plugin system. It supports workflow creation, visual DAG editing, and plugin development.
+LAO is a cross-platform desktop application that orchestrates local AI models through a modular plugin system. Built with Rust + Tauri, it supports agentic workflow creation, visual DAG editing, and prompt-driven orchestration—all running offline.
 
 **Always reference these instructions first and fallback to search or bash commands only when you encounter unexpected information that does not match the info here.**
 
-## Working Effectively
+## Repository Architecture
 
-### Prerequisites
+LAO is a Rust workspace with the following structure:
+
+### Core Components
+- **`core/`** - Main orchestrator library (`lao-orchestrator-core`)
+  - DAG engine with parallel execution, caching, retries
+  - Plugin system with dynamic loading
+  - Prompt dispatcher with LLM integration
+- **`cli/`** - Command-line interface (`lao-cli`)
+  - Workflow execution, validation, plugin management
+  - Prompt-driven workflow generation
+- **`lao_plugin_api/`** - Plugin trait definitions and API
+- **`ui/lao-ui/`** - Tauri + Svelte desktop application
+  - Visual DAG builder, real-time execution monitoring
+
+### Plugin Ecosystem
+- **`plugins/`** - Built-in plugins (8 total):
+  - `EchoPlugin` - Simple text processing (best for testing)
+  - `WhisperPlugin` - Speech-to-text transcription
+  - `OllamaPlugin` - Local LLM integration
+  - `GGUFPlugin` - GGUF model support
+  - `LMStudioPlugin` - LM Studio integration
+  - `SummarizerPlugin` - Text summarization
+  - `PromptDispatcherPlugin` - Workflow generation from prompts
+- **`tools/`** - Development utilities
+  - `plugin-generator/` - Plugin scaffolding tool
+  - `plugin-registry/` - Plugin discovery system
+
+### Supporting Directories
+- **`workflows/`** - Example YAML workflow files
+- **`docs/`** - Comprehensive documentation
+  - `architecture.md`, `plugins.md`, `workflows.md`, `cli.md`
+- **`assets/`** - Application resources
+
+## Prerequisites & Setup
+
+### Required Dependencies
 - **Rust 1.70+**: Install from https://rustup.rs/
 - **Node.js 20+**: Install from https://nodejs.org/
-- **System Dependencies (Linux)**: Install Tauri prerequisites
-  ```bash
-  sudo apt-get update
-  sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf pkg-config
-  ```
 
-### Building the Project
-- **Full Release Build**: 
-  ```bash
-  cargo build --release
-  ```
-  **NEVER CANCEL**: Takes 4-5 minutes. Set timeout to 10+ minutes.
+### System Dependencies (Linux)
+Install Tauri prerequisites:
+```bash
+sudo apt-get update
+sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf pkg-config
+```
 
-- **Debug Build**: 
-  ```bash
-  cargo build
-  ```
-  Takes ~15 seconds.
+## Building & Running
 
-- **Run Tests**: 
-  ```bash
-  cargo test
-  ```
-  **NEVER CANCEL**: Takes 2-3 minutes. Set timeout to 5+ minutes.
+### Build Commands
+```bash
+# Full workspace build (release)
+cargo build --release
+# ⚠️ NEVER CANCEL: Takes 4-5 minutes, set timeout to 10+ minutes
 
-### Running the CLI
-**CRITICAL**: Due to hardcoded plugin paths, the CLI must be run from the `core/` directory:
+# Debug build (faster iteration)
+cargo build
+# Takes ~15 seconds
+
+# Run complete test suite
+cargo test
+# ⚠️ NEVER CANCEL: Takes 2-3 minutes, set timeout to 5+ minutes
+```
+
+### CLI Usage
+**CRITICAL**: Due to hardcoded plugin paths, always run CLI from the `core/` directory:
+
 ```bash
 cd core
+
+# Basic commands
 ../target/release/lao-cli --help
 ../target/release/lao-cli plugin-list
 ../target/release/lao-cli run ../workflows/test.yaml
+
+# Prompt-driven workflows
+../target/release/lao-cli prompt "Summarize this audio and tag action items"
+../target/release/lao-cli validate-prompts
+
+# Workflow validation
+../target/release/lao-cli validate ../workflows/test.yaml
 ```
 
-Available commands:
+Available CLI commands:
 - `run` - Execute workflow YAML files
 - `validate` - Validate workflow syntax and plugin availability
 - `plugin-list` - List all available plugins
 - `prompt` - Generate workflows from natural language prompts
 - `validate-prompts` - Test prompt-to-workflow generation
 
-### Running the UI
+### UI Development
 ```bash
 cd ui/lao-ui
-npm install    # Takes ~8 seconds
-npm run build  # Takes ~4 seconds
-npm run tauri dev  # Start development mode
+npm install        # ~8 seconds
+npm run build      # ~4 seconds
+npm run tauri dev  # Start development mode with hot reload
 ```
 
-## Validation
+## Plugin System
 
-### Manual Testing Scenarios
-1. **Plugin System Validation**:
+### Plugin Architecture
+- Plugins are dynamic libraries (.so/.dll) loaded at runtime
+- Each plugin implements the `LaoPlugin` trait from `lao_plugin_api`
+- Plugin discovery scans the `plugins/` directory
+- Plugins export a C ABI function `plugin_entry_point`
+
+### Plugin Usage in Workflows
+- **Always use full plugin names** in YAML workflows (e.g., `EchoPlugin` not `Echo`)
+- Plugin input/output types are strongly typed via the API
+- Each plugin directory contains a `plugin.yaml` manifest
+
+### Plugin Development
+```bash
+# Use existing plugins as templates (EchoPlugin is simplest)
+# Implement LaoPlugin trait and export C ABI functions
+# Build as cdylib and place .so/.dll in plugins/ directory
+
+# Plugin generator tool (has compilation issues currently)
+cd tools/plugin-generator
+cargo build
+```
+
+## Development Workflow
+
+### Recommended Development Process
+1. **Start with tests**: `cargo test` to ensure everything works
+2. **Build in debug mode**: `cargo build` for faster iteration  
+3. **Test CLI functionality**: Always run from `core/` directory
+4. **Validate changes**: Use CLI validation commands
+5. **Test UI changes**: Use `npm run tauri dev` for hot reload
+6. **Final validation**: Full release build and test suite
+
+### Validation Scenarios
+1. **Plugin System**:
    ```bash
    cd core
    ../target/release/lao-cli plugin-list
-   # Should show: EchoPlugin, WhisperPlugin, OllamaPlugin, etc.
+   # Should show 8 plugins: EchoPlugin, WhisperPlugin, OllamaPlugin, etc.
    ```
 
 2. **Workflow Execution**:
@@ -75,78 +152,49 @@ npm run tauri dev  # Start development mode
    # Should output: "Step 1: Hello from echo!"
    ```
 
-3. **UI Build and Start**:
+3. **Prompt Generation**:
    ```bash
-   cd ui/lao-ui
-   npm run build
-   # Should complete without errors
+   cd core
+   ../target/release/lao-cli validate-prompts
+   # Tests prompt library against expected outputs
    ```
 
-### Validation Requirements
-- **ALWAYS** run from correct directories as specified above
-- **NEVER CANCEL** long-running builds or tests
-- Test workflow execution with the corrected workflow files
-- Verify plugin discovery shows all 8 built-in plugins
+## Common Issues & Solutions
 
-## Repository Structure
-
-### Core Components
-- **`core/`**: Main orchestrator library and plugin system
-- **`cli/`**: Command-line interface binary
-- **`lao_plugin_api/`**: Plugin API definitions and traits
-- **`plugins/`**: Built-in plugins (EchoPlugin, WhisperPlugin, etc.)
-- **`ui/lao-ui/`**: Tauri + Svelte desktop application
-- **`workflows/`**: Example workflow YAML files
-
-### Plugin System
-- Plugins are built as dynamic libraries (.so/.dll files)
-- Plugin discovery loads from `plugins/` directory 
-- Use full plugin names in workflows (e.g., `EchoPlugin` not `Echo`)
-- Each plugin has a `plugin.yaml` manifest file
-
-### Build Artifacts
-- Release binaries: `target/release/lao-cli`
-- Plugin libraries: `target/release/deps/lib*_plugin.so`
-- UI build output: `ui/lao-ui/build/`
-
-## Common Issues and Solutions
-
-### Plugin Path Issues
+### Plugin Path Resolution
 **Problem**: "Plugin 'X' not found" errors
 **Solution**: 
-- Run CLI from `core/` directory: `cd core && ../target/release/lao-cli ...`
-- Use full plugin names in workflows (EchoPlugin, not Echo)
+- Always run CLI from `core/` directory: `cd core && ../target/release/lao-cli ...`
+- Use full plugin names in workflows (`EchoPlugin`, not `Echo`)
 
-### Build Failures
+### Build Dependencies
 **Problem**: Tauri build fails with missing system libraries
-**Solution**: Install system dependencies first:
-```bash
-sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf pkg-config
-```
+**Solution**: Install system dependencies first (see Prerequisites section)
 
-### Workspace Resolver Warning
+### Workspace Warnings
 **Problem**: Warning about workspace resolver version
 **Solution**: This is non-fatal, builds still work correctly
 
-## Development Workflow
-1. **Start with tests**: `cargo test` to ensure everything works
-2. **Build in debug mode**: `cargo build` for faster iteration
-3. **Test CLI functionality**: Run from `core/` directory
-4. **Test UI changes**: Use `npm run tauri dev` for hot reload
-5. **Final validation**: Full release build and test suite
+## Documentation References
 
-## Plugin Development
-- Plugin generator tool exists but has compilation errors
-- Copy existing plugins as templates (EchoPlugin is simplest)
-- Implement the `LaoPlugin` trait and export C ABI functions
-- Place compiled .so/.dll files in `plugins/` directory
+For detailed information, consult:
+- **Architecture**: `docs/architecture.md` - Core components and data flow
+- **Plugin Development**: `docs/plugins.md` - Plugin API and development guide
+- **Workflow Syntax**: `docs/workflows.md` - YAML workflow specification
+- **CLI Reference**: `docs/cli.md` - Complete command documentation
+- **Observability**: `docs/observability.md` - Logging and monitoring
 
-## Time Expectations
-- **Release Build**: 4-5 minutes (NEVER CANCEL)
-- **Debug Build**: ~15 seconds
-- **Test Suite**: 2-3 minutes (NEVER CANCEL)
-- **npm install**: ~8 seconds  
-- **UI Build**: ~4 seconds
-- **Plugin Discovery**: Instant
+## Build Artifacts & Output
 
-Always set timeouts of 10+ minutes for release builds and 5+ minutes for test runs.
+### Key Build Outputs
+- **CLI Binary**: `target/release/lao-cli`
+- **Core Library**: `target/release/lao-orchestrator-core`
+- **Plugin Libraries**: `target/release/deps/lib*_plugin.so`
+- **UI Application**: `ui/lao-ui/src-tauri/target/release/`
+
+### Timeout Recommendations
+Always set appropriate timeouts for long-running operations:
+- **Release builds**: 10+ minutes (actual: 4-5 minutes)
+- **Test suites**: 5+ minutes (actual: 2-3 minutes)
+- **Debug builds**: 30 seconds (actual: ~15 seconds)
+- **npm operations**: 30 seconds (actual: ~8-12 seconds)
