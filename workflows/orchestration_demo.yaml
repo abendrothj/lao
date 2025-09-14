@@ -1,0 +1,13 @@
+workflow: "Enhanced Orchestration Demo"
+steps:
+  - run: EchoPlugin
+    input: "Starting enhanced workflow orchestration demo"
+    cache_key: "demo_start"
+    retries: 2
+    retry_delay: 1000
+  - run: EchoPlugin
+    input_from: step1
+    cache_key: "demo_chain"
+  - run: EchoPlugin
+    input: "Final step: LAO is now a full workflow orchestrator!"
+    depends_on: ["step2"]
