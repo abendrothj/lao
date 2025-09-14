@@ -48,6 +48,16 @@ pub struct BackendState {
     pub is_running: bool,
     pub execution_progress: f32,
     pub workflow_result: Option<WorkflowResult>,
+    pub multimodal_files: Vec<UploadedFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadedFile {
+    pub name: String,
+    pub path: String,
+    pub file_type: String, // "audio", "image", "video", "text", "binary"
+    pub size: usize,
+    pub upload_time: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +82,7 @@ impl Default for BackendState {
             is_running: false,
             execution_progress: 0.0,
             workflow_result: None,
+            multimodal_files: Vec::new(),
         }
     }
 }
@@ -331,6 +342,9 @@ pub fn save_workflow_yaml(graph: &WorkflowGraph, filename: &str) -> Result<(), S
                 cache_key: None,
                 input_from: None,
                 depends_on: None, // Could be enhanced to support dependencies from edges
+                condition: None,
+                on_success: None,
+                on_failure: None,
             }
         }).collect(),
     };
@@ -352,9 +366,63 @@ pub fn export_workflow_yaml(graph: &WorkflowGraph) -> Result<String, String> {
                 cache_key: None,
                 input_from: None,
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             }
         }).collect(),
     };
     
     serde_yaml::to_string(&workflow).map_err(|e| e.to_string())
+}
+
+// Handle file upload for multi-modal input
+pub fn handle_file_upload(file_path: &str, original_name: &str) -> Result<UploadedFile, String> {
+    let metadata = std::fs::metadata(file_path).map_err(|e| e.to_string())?;
+    let size = metadata.len() as usize;
+    
+    // Determine file type based on extension
+    let file_type = match std::path::Path::new(original_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_lowercase())
+        .as_deref()
+    {
+        Some("wav") | Some("mp3") | Some("flac") | Some("m4a") => "audio",
+        Some("jpg") | Some("jpeg") | Some("png") | Some("gif") | Some("bmp") => "image",
+        Some("mp4") | Some("avi") | Some("mov") | Some("mkv") | Some("webm") => "video",
+        Some("txt") | Some("md") | Some("json") | Some("yaml") | Some("yml") => "text",
+        _ => "binary",
+    };
+    
+    // Create uploads directory if it doesn't exist
+    let uploads_dir = "../uploads";
+    std::fs::create_dir_all(uploads_dir).map_err(|e| e.to_string())?;
+    
+    // Copy file to uploads directory with timestamp
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let new_path = format!("{}/{}_{}", uploads_dir, timestamp, original_name);
+    std::fs::copy(file_path, &new_path).map_err(|e| e.to_string())?;
+    
+    Ok(UploadedFile {
+        name: original_name.to_string(),
+        path: new_path,
+        file_type: file_type.to_string(),
+        size,
+        upload_time: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+    })
+}
+
+// Get supported file types for upload
+pub fn get_supported_file_types() -> Vec<&'static str> {
+    vec![
+        "audio/*", "image/*", "video/*", "text/*",
+        ".wav", ".mp3", ".flac", ".m4a",
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp",
+        ".mp4", ".avi", ".mov", ".mkv", ".webm",
+        ".txt", ".md", ".json", ".yaml", ".yml", ".pdf"
+    ]
 }

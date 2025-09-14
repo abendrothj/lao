@@ -13,6 +13,30 @@
   },
   {
     "prompt": "Summarize this audio and create a todo list",
-    "workflow": "workflow: \"Audio Todo\"\nsteps:\n  - run: Whisper\n    input: \"meeting.wav\"\n  - run: Summarizer\n    input_from: Whisper\n  - run: TaskExtractor\n    input_from: Summarizer"
+    "workflow": "workflow: \"Audio Todo\"\nsteps:\n  - run: WhisperPlugin\n    input: \"meeting.wav\"\n    input_type: Audio\n  - run: SummarizerPlugin\n    input_from: WhisperPlugin\n  - run: TaskExtractor\n    input_from: SummarizerPlugin"
+  },
+  {
+    "prompt": "Process video file and extract audio for transcription",
+    "workflow": "workflow: \"Video Transcription\"\nsteps:\n  - run: VideoProcessor\n    input: \"presentation.mp4\"\n    input_type: Video\n  - run: AudioExtractor\n    input_from: VideoProcessor\n  - run: WhisperPlugin\n    input_from: AudioExtractor\n    input_type: Audio\n  - run: SummarizerPlugin\n    input_from: WhisperPlugin"
+  },
+  {
+    "prompt": "Analyze image and generate description with fallback",
+    "workflow": "workflow: \"Image Analysis\"\nsteps:\n  - run: ImageAnalyzer\n    input: \"photo.jpg\"\n    input_type: Image\n    condition:\n      condition_type: StatusEquals\n      field: \"ImageAnalyzer\"\n      operator: Equals\n      value: \"success\"\n  - run: ImageDescriptor\n    input_from: ImageAnalyzer\n    condition:\n      condition_type: PreviousStepStatus\n      field: \"\"\n      operator: Equals\n      value: \"success\"\n  - run: FallbackProcessor\n    input: \"Unable to analyze image\"\n    condition:\n      condition_type: PreviousStepStatus\n      field: \"\"\n      operator: Equals\n      value: \"error\""
+  },
+  {
+    "prompt": "Smart document processing with conditional branching",
+    "workflow": "workflow: \"Smart Document Processing\"\nsteps:\n  - run: FileTypeDetector\n    input: \"document.pdf\"\n    input_type: File\n  - run: PDFProcessor\n    input_from: FileTypeDetector\n    condition:\n      condition_type: OutputContains\n      field: \"FileTypeDetector\"\n      operator: Contains\n      value: \"pdf\"\n  - run: ImageProcessor\n    input_from: FileTypeDetector\n    condition:\n      condition_type: OutputContains\n      field: \"FileTypeDetector\"\n      operator: Contains\n      value: \"image\"\n  - run: TextProcessor\n    input_from: FileTypeDetector\n    condition:\n      condition_type: OutputContains\n      field: \"FileTypeDetector\"\n      operator: Contains\n      value: \"text\"\n  - run: SummarizerPlugin\n    depends_on: [\"PDFProcessor\", \"ImageProcessor\", \"TextProcessor\"]"
+  },
+  {
+    "prompt": "Multi-modal content analysis with error handling",
+    "workflow": "workflow: \"Multi-Modal Analysis\"\nsteps:\n  - run: ContentDetector\n    input: \"content\"\n    input_type: File\n  - run: AudioAnalyzer\n    input_from: ContentDetector\n    condition:\n      condition_type: OutputContains\n      field: \"ContentDetector\"\n      operator: Contains\n      value: \"audio\"\n    retries: 2\n    retry_delay: 1000\n  - run: ImageAnalyzer\n    input_from: ContentDetector\n    condition:\n      condition_type: OutputContains\n      field: \"ContentDetector\"\n      operator: Contains\n      value: \"image\"\n    retries: 2\n    retry_delay: 1000\n  - run: ErrorHandler\n    input: \"Processing failed\"\n    condition:\n      condition_type: PreviousStepStatus\n      field: \"\"\n      operator: Equals\n      value: \"error\"\n  - run: ResultAggregator\n    depends_on: [\"AudioAnalyzer\", \"ImageAnalyzer\"]\n    condition:\n      condition_type: PreviousStepStatus\n      field: \"\"\n      operator: NotEquals\n      value: \"error\""
+  },
+  {
+    "prompt": "Automated file backup with compression",
+    "workflow": "workflow: \"File Backup\"\nsteps:\n  - run: FileSizeChecker\n    input: \"data/\"\n    input_type: File\n  - run: CompressorPlugin\n    input_from: FileSizeChecker\n    condition:\n      condition_type: OutputContains\n      field: \"FileSizeChecker\"\n      operator: GreaterThan\n      value: \"100MB\"\n  - run: DirectCopy\n    input_from: FileSizeChecker\n    condition:\n      condition_type: OutputContains\n      field: \"FileSizeChecker\"\n      operator: LessThan\n      value: \"100MB\"\n  - run: BackupUploader\n    depends_on: [\"CompressorPlugin\", \"DirectCopy\"]"
+  },
+  {
+    "prompt": "Voice command processing with natural language understanding",
+    "workflow": "workflow: \"Voice Command Processing\"\nsteps:\n  - run: WhisperPlugin\n    input: \"voice_command.wav\"\n    input_type: Audio\n  - run: IntentClassifier\n    input_from: WhisperPlugin\n  - run: TaskExecutor\n    input_from: IntentClassifier\n    condition:\n      condition_type: OutputContains\n      field: \"IntentClassifier\"\n      operator: Contains\n      value: \"execute\"\n  - run: InformationProvider\n    input_from: IntentClassifier\n    condition:\n      condition_type: OutputContains\n      field: \"IntentClassifier\"\n      operator: Contains\n      value: \"query\"\n  - run: ConfirmationResponder\n    depends_on: [\"TaskExecutor\", \"InformationProvider\"]"
   }
 ] 

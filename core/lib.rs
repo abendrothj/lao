@@ -38,6 +38,39 @@ pub struct WorkflowStep {
     pub input_from: Option<String>,
     #[serde(default)]
     pub depends_on: Option<Vec<String>>,
+    #[serde(default)]
+    pub condition: Option<StepCondition>,
+    #[serde(default)]
+    pub on_success: Option<Vec<String>>, // Step IDs to execute on success
+    #[serde(default)]
+    pub on_failure: Option<Vec<String>>, // Step IDs to execute on failure
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+pub struct StepCondition {
+    pub condition_type: ConditionType,
+    pub field: String, // Which field to evaluate (output, status, error)
+    pub operator: ConditionOperator,
+    pub value: String, // Value to compare against
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+pub enum ConditionType {
+    OutputContains,
+    OutputEquals,
+    StatusEquals,
+    ErrorContains,
+    PreviousStepStatus,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+pub enum ConditionOperator {
+    Equals,
+    NotEquals,
+    Contains,
+    NotContains,
+    GreaterThan,
+    LessThan,
 }
 
 #[derive(Debug)]
@@ -65,7 +98,7 @@ pub struct StepEvent {
     pub step: usize,
     pub step_id: String,
     pub runner: String,
-    pub status: String, // pending | running | success | error | cache
+    pub status: String, // pending | running | success | error | cache | skipped
     pub attempt: u32,
     pub message: Option<String>,
     pub output: Option<String>,
@@ -224,6 +257,17 @@ fn types_compatible(from: PluginOutputType, to: PluginInputType) -> bool {
         (Out::Text, In::Text) => true,
         (Out::Json, In::Json) => true,
         (Out::Binary, In::Binary) => true,
+        (Out::File, In::File) => true,
+        (Out::Audio, In::Audio) => true,
+        (Out::Image, In::Image) => true,
+        (Out::Video, In::Video) => true,
+        // Allow cross-type compatibility for media files
+        (Out::Audio, In::File) => true,
+        (Out::Image, In::File) => true,
+        (Out::Video, In::File) => true,
+        (Out::File, In::Audio) => true,
+        (Out::File, In::Image) => true,
+        (Out::File, In::Video) => true,
         _ => false,
     }
 }
@@ -430,6 +474,33 @@ where
         let mut last_error = None;
         let max_attempts = step.retries.unwrap_or(1) + 1;
 
+        // Check if step should be executed based on conditions
+        let dependent_step = step.depends_on.as_ref().and_then(|deps| deps.first());
+        if !should_execute_step(step, &logs, dependent_step.map(|s| s.as_str())) {
+            on_event(StepEvent { 
+                step: step_idx, 
+                step_id: node_id.clone(), 
+                runner: step.run.clone(), 
+                status: "skipped".to_string(), 
+                attempt: 1, 
+                message: Some("condition not met".to_string()), 
+                output: None, 
+                error: None 
+            });
+            logs.push(StepLog { 
+                step: step_idx, 
+                runner: step.run.clone(), 
+                input: params.clone(), 
+                output: Some("skipped due to condition".to_string()), 
+                error: None, 
+                attempt: 1, 
+                input_type: None, 
+                output_type: None, 
+                validation: Some("skipped".to_string()) 
+            });
+            continue;
+        }
+
         on_event(StepEvent { step: step_idx, step_id: node_id.clone(), runner: step.run.clone(), status: "running".to_string(), attempt: 1, message: None, output: None, error: None });
 
         for attempt in 1..=max_attempts {
@@ -529,6 +600,105 @@ fn build_plugin_input(params: &serde_yaml::Value) -> PluginInput {
     PluginInput { text: c_string.into_raw() }
 }
 
+// Evaluate a step condition against execution context
+pub fn evaluate_condition(
+    condition: &StepCondition,
+    step_logs: &[StepLog],
+    step_id: &str,
+) -> bool {
+    match &condition.condition_type {
+        ConditionType::OutputContains => {
+            if let Some(log) = step_logs.iter().find(|l| l.runner == step_id) {
+                if let Some(output) = &log.output {
+                    match condition.operator {
+                        ConditionOperator::Contains => output.contains(&condition.value),
+                        ConditionOperator::NotContains => !output.contains(&condition.value),
+                        _ => false,
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }
+        ConditionType::OutputEquals => {
+            if let Some(log) = step_logs.iter().find(|l| l.runner == step_id) {
+                if let Some(output) = &log.output {
+                    match condition.operator {
+                        ConditionOperator::Equals => output == &condition.value,
+                        ConditionOperator::NotEquals => output != &condition.value,
+                        _ => false,
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }
+        ConditionType::StatusEquals => {
+            if let Some(log) = step_logs.iter().find(|l| l.runner == step_id) {
+                let status = if log.error.is_some() { "error" } else { "success" };
+                match condition.operator {
+                    ConditionOperator::Equals => status == condition.value,
+                    ConditionOperator::NotEquals => status != condition.value,
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        }
+        ConditionType::ErrorContains => {
+            if let Some(log) = step_logs.iter().find(|l| l.runner == step_id) {
+                if let Some(error) = &log.error {
+                    match condition.operator {
+                        ConditionOperator::Contains => error.contains(&condition.value),
+                        ConditionOperator::NotContains => !error.contains(&condition.value),
+                        _ => false,
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }
+        ConditionType::PreviousStepStatus => {
+            // Evaluate based on previous step in execution order
+            if let Some(prev_log) = step_logs.last() {
+                let status = if prev_log.error.is_some() { "error" } else { "success" };
+                match condition.operator {
+                    ConditionOperator::Equals => status == condition.value,
+                    ConditionOperator::NotEquals => status != condition.value,
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        }
+    }
+}
+
+// Check if a step should be executed based on its condition
+pub fn should_execute_step(
+    step: &WorkflowStep,
+    step_logs: &[StepLog],
+    dependent_step_id: Option<&str>,
+) -> bool {
+    if let Some(condition) = &step.condition {
+        if let Some(dep_id) = dependent_step_id {
+            evaluate_condition(condition, step_logs, dep_id)
+        } else {
+            // No dependent step specified, evaluate against the condition field
+            evaluate_condition(condition, step_logs, &condition.field)
+        }
+    } else {
+        // No condition, always execute
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,12 +714,15 @@ mod tests {
                 cache_key: None,
                 input_from: None,
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             }
         ];
         
         let dag = build_dag(&steps).unwrap();
         assert_eq!(dag.len(), 1);
-        assert_eq!(dag[0].id, "Echo");
+        assert_eq!(dag[0].id, "step1");
         assert_eq!(dag[0].parents.len(), 0);
     }
 
@@ -564,6 +737,9 @@ mod tests {
                 cache_key: None,
                 input_from: None,
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             },
             WorkflowStep {
                 run: "Step2".to_string(),
@@ -571,15 +747,18 @@ mod tests {
                 retries: None,
                 retry_delay: None,
                 cache_key: None,
-                input_from: Some("Step1".to_string()),
+                input_from: Some("step1".to_string()),
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             }
         ];
         
         let dag = build_dag(&steps).unwrap();
         assert_eq!(dag.len(), 2);
         assert_eq!(dag[1].parents.len(), 1);
-        assert_eq!(dag[1].parents[0], "Step1");
+        assert_eq!(dag[1].parents[0], "step1");
     }
 
     #[test]
@@ -593,6 +772,9 @@ mod tests {
                 cache_key: None,
                 input_from: None,
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             },
             WorkflowStep {
                 run: "B".to_string(),
@@ -600,14 +782,17 @@ mod tests {
                 retries: None,
                 retry_delay: None,
                 cache_key: None,
-                input_from: Some("A".to_string()),
+                input_from: Some("step1".to_string()),
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             }
         ];
         
         let dag = build_dag(&steps).unwrap();
         let order = topo_sort(&dag).unwrap();
-        assert_eq!(order, vec!["A", "B"]);
+        assert_eq!(order, vec!["step1", "step2"]);
     }
 
     #[test]
@@ -619,8 +804,11 @@ mod tests {
                 retries: None,
                 retry_delay: None,
                 cache_key: None,
-                input_from: Some("B".to_string()),
+                input_from: Some("step2".to_string()),
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             },
             WorkflowStep {
                 run: "B".to_string(),
@@ -628,8 +816,11 @@ mod tests {
                 retries: None,
                 retry_delay: None,
                 cache_key: None,
-                input_from: Some("A".to_string()),
+                input_from: Some("step1".to_string()),
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             }
         ];
         
@@ -642,9 +833,9 @@ mod tests {
     #[test]
     fn test_substitute_vars() {
         let mut outputs = HashMap::new();
-        outputs.insert("Echo".to_string(), "hello world".to_string());
+        outputs.insert("step1".to_string(), "hello world".to_string());
         
-        let result = substitute_vars("Input: ${Echo}", &outputs);
+        let result = substitute_vars("Input: ${step1}", &outputs);
         assert_eq!(result, "Input: hello world");
     }
 

@@ -1,0 +1,27 @@
+workflow: "Multi-Modal Processing Example"
+steps:
+  - run: EchoPlugin
+    input: "Processing audio file: meeting.wav"
+    input_type: Audio
+    
+  - run: EchoPlugin
+    input_from: "EchoPlugin"
+    condition:
+      condition_type: PreviousStepStatus
+      field: ""
+      operator: Equals
+      value: "success"
+    
+  - run: EchoPlugin
+    input: "Processing image file: screenshot.png"
+    input_type: Image
+    depends_on: ["EchoPlugin"]
+    
+  - run: EchoPlugin
+    input: "Combining results from audio and image processing"
+    depends_on: ["EchoPlugin"]
+    condition:
+      condition_type: PreviousStepStatus
+      field: ""
+      operator: Equals
+      value: "success"
