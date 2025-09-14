@@ -38,4 +38,5 @@ pnpm-debug.log*
 
 # Vite/SvelteKit
 /ui/lao-ui/vite.config.js.timestamp-*
-/ui/lao-ui/vite.config.ts.timestamp-* 
+/ui/lao-ui/vite.config.ts.timestamp-* plugins_runtime/
+ui/lao-ui/gen/

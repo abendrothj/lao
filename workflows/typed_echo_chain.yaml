@@ -1,6 +1,6 @@
 workflow: "Typed Echo Chain"
 steps:
-  - run: Echo
+  - run: EchoPlugin
     input: "Hello, LAO!"
-  - run: Echo
+  - run: EchoPlugin
     input_from: step1 
