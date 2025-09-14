@@ -1,4 +1,5 @@
 workflow: "Echo Test"
 steps:
   - run: EchoPlugin
-    input: "Step 1: Hello from echo!" 
+    params:
+      input: "Step 1: Hello from echo!" 
