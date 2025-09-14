@@ -1,9 +1,0 @@
-{
-    "permissions": [
-      "fs:allow-mkdir",
-      "fs:allow-app-write",
-      "fs:allow-app-write-recursive",
-      "fs:default",
-      "fs:write-all"
-    ]
-  }
