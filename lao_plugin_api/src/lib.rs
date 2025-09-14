@@ -6,6 +6,16 @@ pub struct PluginInput {
 }
 
 #[repr(C)]
+pub struct MultiModalInput {
+    pub input_type: u32, // Maps to PluginInputType as discriminant
+    pub text_data: *mut c_char,
+    pub file_path: *mut c_char,
+    pub binary_data: *mut u8,
+    pub binary_size: usize,
+    pub metadata: *mut c_char, // JSON metadata for additional context
+}
+
+#[repr(C)]
 pub struct PluginOutput {
     pub text: *mut c_char,
 }
@@ -42,6 +52,10 @@ pub enum PluginInputType {
     Text,
     Json,
     Binary,
+    File,
+    Audio,
+    Image,
+    Video,
     Any,
 }
 
@@ -50,6 +64,10 @@ pub enum PluginOutputType {
     Text,
     Json,
     Binary,
+    File,
+    Audio,
+    Image,
+    Video,
     Any,
 }
 

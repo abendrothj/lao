@@ -1,0 +1,30 @@
+workflow: "Conditional Processing Example"
+steps:
+  - run: EchoPlugin
+    input: "Initial step: checking file type"
+    
+  - run: EchoPlugin
+    input: "Processing PDF file"
+    condition:
+      condition_type: OutputContains
+      field: "EchoPlugin"
+      operator: Contains
+      value: "pdf"
+    depends_on: ["EchoPlugin"]
+    
+  - run: EchoPlugin
+    input: "Processing text file"
+    condition:
+      condition_type: OutputContains
+      field: "EchoPlugin"
+      operator: Contains
+      value: "text"
+    depends_on: ["EchoPlugin"]
+    
+  - run: EchoPlugin
+    input: "Fallback: unknown file type"
+    condition:
+      condition_type: PreviousStepStatus
+      field: ""
+      operator: Equals
+      value: "error"

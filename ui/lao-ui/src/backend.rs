@@ -1,5 +1,6 @@
 use lao_orchestrator_core::{load_workflow_yaml, run_workflow_yaml_with_callback, run_workflow_yaml_parallel_with_callback, StepEvent};
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowGraph {
@@ -16,6 +17,10 @@ pub struct GraphNode {
     pub status: String,
     pub x: f32,
     pub y: f32,
+    pub message: Option<String>,
+    pub output: Option<String>,
+    pub error: Option<String>,
+    pub attempt: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +45,29 @@ pub struct BackendState {
     pub plugins: Vec<UiPluginInfo>,
     pub live_logs: Vec<String>,
     pub selected_node: Option<String>,
+    pub is_running: bool,
+    pub execution_progress: f32,
+    pub workflow_result: Option<WorkflowResult>,
+    pub multimodal_files: Vec<UploadedFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadedFile {
+    pub name: String,
+    pub path: String,
+    pub file_type: String, // "audio", "image", "video", "text", "binary"
+    pub size: usize,
+    pub upload_time: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowResult {
+    pub success: bool,
+    pub total_steps: usize,
+    pub completed_steps: usize,
+    pub failed_steps: usize,
+    pub execution_time: f32,
+    pub final_message: String,
 }
 
 impl Default for BackendState {
@@ -51,6 +79,10 @@ impl Default for BackendState {
             plugins: Vec::new(),
             live_logs: Vec::new(),
             selected_node: None,
+            is_running: false,
+            execution_progress: 0.0,
+            workflow_result: None,
+            multimodal_files: Vec::new(),
         }
     }
 }
@@ -74,6 +106,10 @@ pub fn get_workflow_graph(path: &str) -> Result<WorkflowGraph, String> {
             status: "pending".to_string(),
             x: 100.0 + (_i as f32 * 150.0),
             y: 100.0,
+            message: None,
+            output: None,
+            error: None,
+            attempt: 0,
         });
         
         if let Some(ref from) = step.input_from {
@@ -182,10 +218,68 @@ fn resolve_plugins_dir() -> String {
     "plugins/".to_string()
 }
 
-pub fn run_workflow_stream(path: String, parallel: bool, log_callback: impl Fn(String) + Send + Sync + 'static) -> Result<(), String> {
+pub fn run_workflow_stream(
+    path: String, 
+    parallel: bool, 
+    state: Arc<Mutex<BackendState>>
+) -> Result<(), String> {
     std::thread::spawn(move || {
-        let emit = |e: StepEvent| {
-            log_callback(format!("{:?}", e));
+        let start_time = std::time::Instant::now();
+        let mut total_steps = 0;
+        let mut completed_steps = 0;
+        let mut failed_steps = 0;
+        
+        // Initialize execution state
+        {
+            let mut state_guard = state.lock().unwrap();
+            state_guard.is_running = true;
+            state_guard.execution_progress = 0.0;
+            state_guard.workflow_result = None;
+            state_guard.error.clear();
+            
+            // Count total steps for progress tracking
+            if let Some(ref graph) = state_guard.graph {
+                total_steps = graph.nodes.len();
+            }
+        }
+        
+        let emit = |event: StepEvent| {
+            if let Ok(mut state_guard) = state.lock() {
+                // Update node status in graph
+                if let Some(ref mut graph) = state_guard.graph {
+                    if let Some(node) = graph.nodes.iter_mut().find(|n| n.id == event.step_id) {
+                        node.status = event.status.clone();
+                        node.message = event.message.clone();
+                        node.output = event.output.clone();
+                        node.error = event.error.clone();
+                        node.attempt = event.attempt;
+                    }
+                }
+                
+                // Add to live logs
+                let log_message = format!(
+                    "[{}] {}: {} (attempt {}){}", 
+                    event.step_id,
+                    event.runner,
+                    event.status,
+                    event.attempt,
+                    event.message.map(|m| format!(" - {}", m)).unwrap_or_default()
+                );
+                state_guard.live_logs.push(log_message);
+                
+                // Limit log size
+                if state_guard.live_logs.len() > 200 {
+                    state_guard.live_logs.remove(0);
+                }
+                
+                // Update progress
+                if event.status == "success" || event.status == "cache" {
+                    completed_steps += 1;
+                    state_guard.execution_progress = completed_steps as f32 / total_steps as f32;
+                } else if event.status == "error" {
+                    failed_steps += 1;
+                }
+            }
         };
         
         let result = if parallel {
@@ -194,11 +288,141 @@ pub fn run_workflow_stream(path: String, parallel: bool, log_callback: impl Fn(S
             run_workflow_yaml_with_callback(&path, emit)
         };
         
-        match result {
-            Ok(logs) => log_callback(format!("DONE: Workflow completed with {} steps", logs.len())),
-            Err(err) => log_callback(format!("ERROR: {}", err)),
+        let execution_time = start_time.elapsed().as_secs_f32();
+        
+        // Update final state
+        if let Ok(mut state_guard) = state.lock() {
+            state_guard.is_running = false;
+            state_guard.execution_progress = 1.0;
+            
+            let workflow_result = match result {
+                Ok(logs) => {
+                    let final_message = format!("Workflow completed successfully with {} steps in {:.2}s", logs.len(), execution_time);
+                    state_guard.live_logs.push(format!("✓ DONE: {}", final_message));
+                    WorkflowResult {
+                        success: true,
+                        total_steps,
+                        completed_steps: logs.len(),
+                        failed_steps: 0,
+                        execution_time,
+                        final_message,
+                    }
+                },
+                Err(err) => {
+                    let final_message = format!("Workflow failed: {}", err);
+                    state_guard.live_logs.push(format!("✗ ERROR: {}", final_message));
+                    state_guard.error = err;
+                    WorkflowResult {
+                        success: false,
+                        total_steps,
+                        completed_steps,
+                        failed_steps,
+                        execution_time,
+                        final_message,
+                    }
+                }
+            };
+            
+            state_guard.workflow_result = Some(workflow_result);
         }
     });
     
     Ok(())
+}
+
+pub fn save_workflow_yaml(graph: &WorkflowGraph, filename: &str) -> Result<(), String> {
+    let workflow = lao_orchestrator_core::Workflow {
+        workflow: filename.trim_end_matches(".yaml").to_string(),
+        steps: graph.nodes.iter().map(|node| {
+            lao_orchestrator_core::WorkflowStep {
+                run: node.run.clone(),
+                params: serde_yaml::Value::Null, // Could be enhanced to support parameters
+                retries: None,
+                retry_delay: None,
+                cache_key: None,
+                input_from: None,
+                depends_on: None, // Could be enhanced to support dependencies from edges
+                condition: None,
+                on_success: None,
+                on_failure: None,
+            }
+        }).collect(),
+    };
+    
+    let yaml_content = serde_yaml::to_string(&workflow).map_err(|e| e.to_string())?;
+    std::fs::write(format!("../workflows/{}", filename), yaml_content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn export_workflow_yaml(graph: &WorkflowGraph) -> Result<String, String> {
+    let workflow = lao_orchestrator_core::Workflow {
+        workflow: "generated_workflow".to_string(),
+        steps: graph.nodes.iter().map(|node| {
+            lao_orchestrator_core::WorkflowStep {
+                run: node.run.clone(),
+                params: serde_yaml::Value::Null,
+                retries: None,
+                retry_delay: None,
+                cache_key: None,
+                input_from: None,
+                depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
+            }
+        }).collect(),
+    };
+    
+    serde_yaml::to_string(&workflow).map_err(|e| e.to_string())
+}
+
+// Handle file upload for multi-modal input
+pub fn handle_file_upload(file_path: &str, original_name: &str) -> Result<UploadedFile, String> {
+    let metadata = std::fs::metadata(file_path).map_err(|e| e.to_string())?;
+    let size = metadata.len() as usize;
+    
+    // Determine file type based on extension
+    let file_type = match std::path::Path::new(original_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_lowercase())
+        .as_deref()
+    {
+        Some("wav") | Some("mp3") | Some("flac") | Some("m4a") => "audio",
+        Some("jpg") | Some("jpeg") | Some("png") | Some("gif") | Some("bmp") => "image",
+        Some("mp4") | Some("avi") | Some("mov") | Some("mkv") | Some("webm") => "video",
+        Some("txt") | Some("md") | Some("json") | Some("yaml") | Some("yml") => "text",
+        _ => "binary",
+    };
+    
+    // Create uploads directory if it doesn't exist
+    let uploads_dir = "../uploads";
+    std::fs::create_dir_all(uploads_dir).map_err(|e| e.to_string())?;
+    
+    // Copy file to uploads directory with timestamp
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let new_path = format!("{}/{}_{}", uploads_dir, timestamp, original_name);
+    std::fs::copy(file_path, &new_path).map_err(|e| e.to_string())?;
+    
+    Ok(UploadedFile {
+        name: original_name.to_string(),
+        path: new_path,
+        file_type: file_type.to_string(),
+        size,
+        upload_time: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+    })
+}
+
+// Get supported file types for upload
+pub fn get_supported_file_types() -> Vec<&'static str> {
+    vec![
+        "audio/*", "image/*", "video/*", "text/*",
+        ".wav", ".mp3", ".flac", ".m4a",
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp",
+        ".mp4", ".avi", ".mov", ".mkv", ".webm",
+        ".txt", ".md", ".json", ".yaml", ".yml", ".pdf"
+    ]
 }

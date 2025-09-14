@@ -77,6 +77,9 @@ fn test_workflow_execution_success() {
             cache_key: None,
             input_from: None,
             depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
         }],
     };
     let path = "temp_workflow.yaml";
@@ -102,6 +105,9 @@ fn test_workflow_plugin_missing() {
             cache_key: None,
             input_from: None,
             depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
         }],
     };
     let dag = build_dag(&workflow.steps).unwrap();
@@ -123,6 +129,9 @@ fn test_workflow_invalid_step() {
             cache_key: None,
             input_from: None,
             depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
         }],
     };
     let dag = build_dag(&workflow.steps).unwrap();
@@ -177,6 +186,9 @@ fn test_caching_and_retries() {
             cache_key: Some("echo_cache_test".to_string()),
             input_from: None,
             depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
         }],
     };
     let path = "temp_cache.yaml";
@@ -212,6 +224,9 @@ fn test_log_output() {
             cache_key: None,
             input_from: None,
             depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
         }],
     };
     let path = "temp_log.yaml";
@@ -239,6 +254,9 @@ fn test_multi_plugin_workflow() {
                 cache_key: None,
                 input_from: None,
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             },
             WorkflowStep {
                 run: "SummarizerPlugin".to_string(),
@@ -248,6 +266,9 @@ fn test_multi_plugin_workflow() {
                 cache_key: None,
                 input_from: Some("EchoPlugin".to_string()),
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             },
         ],
     };
@@ -273,6 +294,9 @@ fn test_circular_dependency() {
                 cache_key: None,
                 input_from: Some("Summarizer".to_string()),
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             },
             WorkflowStep {
                 run: "Summarizer".to_string(),
@@ -282,6 +306,9 @@ fn test_circular_dependency() {
                 cache_key: None,
                 input_from: Some("EchoPlugin".to_string()),
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             },
         ],
     };
@@ -315,6 +342,9 @@ fn test_plugin_type_mismatch() {
                 cache_key: None,
                 input_from: None,
                 depends_on: None,
+                condition: None,
+                on_success: None,
+                on_failure: None,
             },
         ],
     };
