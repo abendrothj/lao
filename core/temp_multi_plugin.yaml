@@ -1,6 +1,6 @@
 workflow: Multi-Plugin Chain
 steps:
-- run: Echo
+- run: EchoPlugin
   input: Chain this!
   retries: 1
   retry_delay: null
@@ -11,5 +11,5 @@ steps:
   retries: 1
   retry_delay: null
   cache_key: null
-  input_from: Echo
+  input_from: EchoPlugin
   depends_on: null
