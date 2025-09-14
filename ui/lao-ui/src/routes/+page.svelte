@@ -5,6 +5,10 @@
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import VisualGraphEditor from "../components/VisualGraphEditor.svelte";
+  import Button from "../lib/components/Button.svelte";
+  import Card from "../lib/components/Card.svelte";
+  import Input from "../lib/components/Input.svelte";
+  import Alert from "../lib/components/Alert.svelte";
 
   let name = $state("");
   let greetMsg = $state("");
@@ -35,6 +39,8 @@
   let liveLogs = $state([]);
   let unlistenStatus;
   let unlistenDone;
+  let isRunning = $state(false);
+
   onMount(async () => {
     unlistenStatus = await listen("workflow:status", ({ payload }) => {
       liveLogs = [...liveLogs, JSON.stringify(payload)];
@@ -42,6 +48,7 @@
     });
     unlistenDone = await listen("workflow:done", ({ payload }) => {
       liveLogs = [...liveLogs, `DONE: ${JSON.stringify(payload)}`];
+      isRunning = false;
     });
     try {
       const list = await invoke("list_plugins_for_ui");
@@ -69,6 +76,7 @@
   let generatedYaml = $state("");
   let genError = $state("");
   let genGraph = $state(null);
+  let isGenerating = $state(false);
 
   async function greet(event) {
     event.preventDefault();
@@ -100,10 +108,12 @@
     if (!workflowPath) { error = "Set a workflow path first"; return; }
     error = "";
     liveLogs = [];
+    isRunning = true;
     try {
       await invoke("run_workflow_stream", { path: workflowPath, parallel });
     } catch (e) {
       error = e.message || e;
+      isRunning = false;
     }
   }
 
@@ -134,8 +144,7 @@ steps:
       genError = "Please enter a prompt.";
       return;
     }
-    // Add a note to the user
-    genError = "Generating workflow... this may take a few seconds.";
+    isGenerating = true;
     try {
       const yaml = await invoke("dispatch_prompt", { prompt });
       generatedYaml = yaml;
@@ -149,6 +158,8 @@ steps:
       genGraph = await invoke("get_workflow_graph", { path: tempPath });
     } catch (e) {
       genError = e.message || e;
+    } finally {
+      isGenerating = false;
     }
   }
 
@@ -202,321 +213,381 @@ steps:
   }
 </script>
 
-<main class="container">
-  <img src="/logo-full.png" alt="LAO Logo" class="lao-logo" />
-  <form class="row" onsubmit={greet}>
-    <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
-    <button type="submit">Greet</button>
-  </form>
-  <p>{greetMsg}</p>
-
-  <section style="margin-top: 2em;">
-    <h2>Prompt-Driven Workflow</h2>
-    <input placeholder="Describe your workflow (e.g. 'Summarize this audio and tag action items')" bind:value={prompt} style="width: 60%;" />
-    <button onclick={generateWorkflowFromPrompt}>Generate Workflow</button>
-    {#if genError}
-      <p style="color: red;">{genError}</p>
-    {/if}
-    {#if generatedYaml}
-      <h3>Generated Workflow YAML</h3>
-      <pre>{generatedYaml}</pre>
-    {/if}
-    {#if genGraph}
-      <h3>Visualized Workflow</h3>
-      <div class="graph-vis">
-        <div class="nodes">
-          {#each genGraph.nodes as node}
-            <div class="node-card">
-              <b>{node.id}</b>: {node.run} (<i>{node.status}</i>)
-            </div>
-          {/each}
-        </div>
-        <div class="edges">
-          <h4>Edges</h4>
-          <ul>
-            {#each genGraph.edges as edge}
-              <li>{edge.from} → {edge.to}</li>
-            {/each}
-          </ul>
-        </div>
+<main class="min-h-screen bg-background">
+  <!-- Header -->
+  <header class="border-b border-border bg-surface-elevated">
+    <div class="container py-6">
+      <div class="flex items-center justify-center mb-6">
+        <img src="/logo-full.png" alt="LAO Logo" class="h-16 w-auto" />
       </div>
-    {/if}
-  </section>
+      
+      <!-- Quick greet section -->
+      <form class="flex gap-3 justify-center max-w-md mx-auto" onsubmit={greet}>
+        <Input 
+          placeholder="Enter a name..." 
+          bind:value={name}
+          class="flex-1"
+        />
+        <Button type="submit" variant="primary">Greet</Button>
+      </form>
+      {#if greetMsg}
+        <p class="text-center mt-3 text-secondary">{greetMsg}</p>
+      {/if}
+    </div>
+  </header>
 
-  <section style="margin-top: 2em;">
-    <h2>Visual Flow Builder</h2>
-    <button onclick={newWorkflow}>New Workflow</button>
-    <input placeholder="Workflow YAML path..." bind:value={workflowPath} />
-    <button onclick={loadGraph}>Load Workflow</button>
-    <button onclick={() => runWorkflow(false)}>Run</button>
-    <button onclick={() => runWorkflow(true)}>Run (Parallel)</button>
-    {#if error}
-      <p style="color: red;">{error}</p>
-    {/if}
-    {#if graph}
-      <div style="margin-top: 1em;">
-        <VisualGraphEditor {graph} on:updateGraph={e => graph = e.detail} on:selectNode={onSelectNode} />
-        {#if selectedNode}
-          <div style="margin: 1em auto; max-width: 640px; text-align: left;">
-            <h3>Node Inspector</h3>
-            <div class="dnd-node">
-              <div>
-                <div><b>ID:</b> {selectedNode.id}</div>
-                <div>
-                  <label><b>Run:</b></label>
-                  <select bind:value={selectedNode.run} onchange={(e) => updateSelectedNodeRun(e.target.value)}>
-                    {#each plugins as p}
-                      <option value={p.name}>{p.name}</option>
-                    {/each}
-                  </select>
+  <div class="container py-8">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <!-- Prompt-Driven Workflow -->
+      <Card title="AI Workflow Generator" subtitle="Describe your workflow in natural language">
+        <div class="space-y-4">
+          <textarea 
+            class="textarea w-full h-24" 
+            placeholder="Describe your workflow (e.g. 'Summarize this audio and tag action items')"
+            bind:value={prompt}
+          ></textarea>
+          
+          <Button 
+            onclick={generateWorkflowFromPrompt} 
+            loading={isGenerating}
+            disabled={!prompt.trim()}
+            variant="primary"
+            class="w-full"
+          >
+            {isGenerating ? 'Generating...' : 'Generate Workflow'}
+          </Button>
+          
+          {#if genError}
+            <Alert variant="error" title="Generation Error">
+              {genError}
+            </Alert>
+          {/if}
+          
+          {#if generatedYaml}
+            <div class="space-y-3">
+              <h4 class="font-medium text-primary">Generated Workflow YAML</h4>
+              <pre class="text-xs bg-surface p-3 rounded-md border overflow-auto">{generatedYaml}</pre>
+            </div>
+          {/if}
+          
+          {#if genGraph}
+            <div class="space-y-3">
+              <h4 class="font-medium text-primary">Workflow Preview</h4>
+              <div class="bg-surface p-4 rounded-md border">
+                <div class="flex flex-wrap gap-2">
+                  {#each genGraph.nodes as node}
+                    <div class="px-3 py-2 bg-primary text-white rounded-md text-sm">
+                      <div class="font-medium">{node.id}</div>
+                      <div class="text-xs opacity-80">{node.run}</div>
+                    </div>
+                  {/each}
                 </div>
-                <button onclick={removeSelectedNode}>Remove Node</button>
+                {#if genGraph.edges.length > 0}
+                  <div class="mt-3 pt-3 border-t border-border">
+                    <div class="text-xs text-muted mb-2">Connections:</div>
+                    <div class="flex flex-wrap gap-2">
+                      {#each genGraph.edges as edge}
+                        <span class="text-xs text-secondary">{edge.from} → {edge.to}</span>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/if}
+        </div>
+      </Card>
+
+      <!-- Workflow Management -->
+      <Card title="Workflow Management" subtitle="Load, create, and run workflows">
+        <div class="space-y-4">
+          <div class="flex gap-2">
+            <Button onclick={newWorkflow} variant="secondary" size="small">New</Button>
+            <Input 
+              placeholder="Workflow YAML path..." 
+              bind:value={workflowPath}
+              class="flex-1"
+            />
+            <Button onclick={loadGraph} variant="secondary">Load</Button>
+          </div>
+          
+          <div class="flex gap-2">
+            <Button 
+              onclick={() => runWorkflow(false)} 
+              variant="primary"
+              loading={isRunning}
+              disabled={!workflowPath || isRunning}
+            >
+              {isRunning ? 'Running...' : 'Run Sequential'}
+            </Button>
+            <Button 
+              onclick={() => runWorkflow(true)} 
+              variant="secondary"
+              disabled={!workflowPath || isRunning}
+            >
+              Run Parallel
+            </Button>
+          </div>
+          
+          {#if error}
+            <Alert variant="error" title="Workflow Error">
+              {error}
+            </Alert>
+          {/if}
+        </div>
+      </Card>
+    </div>
+
+    <!-- Visual Graph Editor -->
+    {#if graph}
+      <Card title="Visual Workflow Editor" subtitle="Design your workflow visually" class="mt-8">
+        <VisualGraphEditor {graph} on:updateGraph={e => graph = e.detail} on:selectNode={onSelectNode} />
+        
+        <!-- Node Inspector -->
+        {#if selectedNode}
+          <div class="mt-6 p-4 bg-surface rounded-md border">
+            <h4 class="font-medium text-primary mb-3">Node Inspector</h4>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-secondary mb-1">Node ID</label>
+                <div class="px-3 py-2 bg-background border rounded-md text-sm">{selectedNode.id}</div>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-secondary mb-1">Plugin Type</label>
+                <select bind:value={selectedNode.run} class="select w-full" onchange={(e) => updateSelectedNodeRun(e.target.value)}>
+                  {#each plugins as p}
+                    <option value={p.name}>{p.name}</option>
+                  {/each}
+                </select>
+              </div>
+              <div class="flex items-end">
+                <Button onclick={removeSelectedNode} variant="secondary" size="small">Remove Node</Button>
               </div>
             </div>
           </div>
         {/if}
-        <h3>Add Node</h3>
-        <input placeholder="Node name (optional)" bind:value={newNodeName} />
-        <select bind:value={newNodeType}>
-          {#if plugins && plugins.length}
-            {#each plugins as p}
-              <option value={p.name}>{p.name}</option>
-            {/each}
-          {:else}
-            <option disabled selected>Loading plugins...</option>
-          {/if}
-        </select>
-        <button onclick={addNode}>Add Node</button>
-        <h3>Export/Import Workflow</h3>
-        <input placeholder="Filename (e.g. new_workflow.yaml)" bind:value={newWorkflowFilename} />
-        <button onclick={() => saveWorkflowAsYaml(newWorkflowFilename)}>Save as YAML</button>
-        <button onclick={exportYAML}>Export as YAML (Preview)</button>
-        {#if yamlExport}
-          <pre>{yamlExport}</pre>
-        {/if}
-        <div style="margin-top: 1em;">
-          <textarea rows="8" style="width:100%;" bind:value={yamlText} placeholder="Paste YAML here..."></textarea>
-          <button onclick={importYAML}>Import YAML</button>
+        
+        <!-- Add Node Section -->
+        <div class="mt-6 p-4 bg-surface rounded-md border">
+          <h4 class="font-medium text-primary mb-3">Add New Node</h4>
+          <div class="flex gap-3">
+            <Input 
+              placeholder="Node name (optional)" 
+              bind:value={newNodeName}
+              class="flex-1"
+            />
+            <select bind:value={newNodeType} class="select">
+              {#if plugins && plugins.length}
+                {#each plugins as p}
+                  <option value={p.name}>{p.name}</option>
+                {/each}
+              {:else}
+                <option disabled selected>Loading plugins...</option>
+              {/if}
+            </select>
+            <Button onclick={addNode} variant="primary">Add Node</Button>
+          </div>
         </div>
-      </div>
+        
+        <!-- Export/Import Section -->
+        <div class="mt-6 p-4 bg-surface rounded-md border">
+          <h4 class="font-medium text-primary mb-3">Export/Import Workflow</h4>
+          <div class="space-y-4">
+            <div class="flex gap-3">
+              <Input 
+                placeholder="Filename (e.g. new_workflow.yaml)" 
+                bind:value={newWorkflowFilename}
+                class="flex-1"
+              />
+              <Button onclick={() => saveWorkflowAsYaml(newWorkflowFilename)} variant="secondary">Save as YAML</Button>
+              <Button onclick={exportYAML} variant="secondary">Preview YAML</Button>
+            </div>
+            
+            {#if yamlExport}
+              <pre class="text-xs bg-background p-3 rounded-md border overflow-auto">{yamlExport}</pre>
+            {/if}
+            
+            <div class="space-y-2">
+              <textarea 
+                class="textarea w-full h-32" 
+                bind:value={yamlText} 
+                placeholder="Paste YAML here to import..."
+              ></textarea>
+              <Button onclick={importYAML} variant="secondary" size="small">Import YAML</Button>
+            </div>
+          </div>
+        </div>
+      </Card>
     {/if}
-  </section>
-  <section style="margin-top: 2em;">
-    <h2>Live Logs</h2>
-    <div class="live-logs">
-      {#each liveLogs as log}
-        <div class="log-entry">{log}</div>
-      {/each}
-    </div>
-  </section>
+
+    <!-- Live Logs -->
+    <Card title="Execution Logs" subtitle="Real-time workflow execution status" class="mt-8">
+      <div class="bg-slate-900 text-green-400 font-mono text-sm p-4 rounded-md h-64 overflow-y-auto">
+        {#if liveLogs.length === 0}
+          <div class="text-slate-500">No logs yet. Run a workflow to see execution details.</div>
+        {:else}
+          {#each liveLogs as log}
+            <div class="mb-1">{log}</div>
+          {/each}
+        {/if}
+      </div>
+    </Card>
+  </div>
 </main>
 
 <style>
-.lao-logo {
-  display: block;
-  margin: 0 auto 2em auto;
-  max-width: 300px;
-  height: auto;
-}
-.graph-vis {
-  display: flex;
-  flex-direction: row;
-  gap: 2em;
-  margin-top: 1em;
-  justify-content: center;
-}
-.nodes {
-  display: flex;
-  flex-direction: column;
-  gap: 1em;
-}
-.node-card {
-  background: #222;
-  color: #fff;
-  border-radius: 8px;
-  padding: 1em 2em;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-  min-width: 180px;
-  text-align: left;
-}
-.edges ul {
-  list-style: none;
-  padding: 0;
-}
-.edges li {
-  color: #aaa;
-  font-size: 1em;
-}
-
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.svelte-kit:hover {
-  filter: drop-shadow(0 0 2em #ff3e00);
-}
-
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
+  .space-y-4 > * + * {
+    margin-top: 1rem;
   }
-
-  a:hover {
-    color: #24c8db;
+  
+  .space-y-3 > * + * {
+    margin-top: 0.75rem;
   }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
+  
+  .space-y-2 > * + * {
+    margin-top: 0.5rem;
   }
-  button:active {
-    background-color: #0f0f0f69;
+  
+  .min-h-screen {
+    min-height: 100vh;
   }
-}
-
-.dnd-node {
-  background: #f0f0f0;
-  margin-bottom: 0.5em;
-  padding: 0.5em 1em;
-  border-radius: 6px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-  display: flex;
-  align-items: center;
-  gap: 1em;
-}
-.live-logs {
-  background: #222;
-  color: #fff;
-  border-radius: 8px;
-  padding: 1em 2em;
-  min-height: 120px;
-  max-height: 240px;
-  overflow-y: auto;
-  font-family: monospace;
-}
-.log-entry {
-  margin-bottom: 0.25em;
-}
-.modal-backdrop {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-.modal {
-  background: #fff;
-  color: #222;
-  border-radius: 12px;
-  padding: 2em 2.5em;
-  max-width: 480px;
-  box-shadow: 0 4px 32px rgba(0,0,0,0.25);
-  text-align: center;
-}
-.demo-video-placeholder {
-  width: 100%;
-  height: 180px;
-  background: #eee;
-  color: #888;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  margin-bottom: 1em;
-  margin-top: 0.5em;
-}
+  
+  .bg-background {
+    background-color: var(--color-background);
+  }
+  
+  .bg-surface {
+    background-color: var(--color-surface);
+  }
+  
+  .bg-surface-elevated {
+    background-color: var(--color-surface-elevated);
+  }
+  
+  .border-border {
+    border-color: var(--color-border);
+  }
+  
+  .border-b {
+    border-bottom-width: 1px;
+  }
+  
+  .w-full {
+    width: 100%;
+  }
+  
+  .h-16 {
+    height: 4rem;
+  }
+  
+  .h-24 {
+    height: 6rem;
+  }
+  
+  .h-32 {
+    height: 8rem;
+  }
+  
+  .h-64 {
+    height: 16rem;
+  }
+  
+  .w-auto {
+    width: auto;
+  }
+  
+  .max-w-md {
+    max-width: 28rem;
+  }
+  
+  .mx-auto {
+    margin-left: auto;
+    margin-right: auto;
+  }
+  
+  .py-6 {
+    padding-top: 1.5rem;
+    padding-bottom: 1.5rem;
+  }
+  
+  .py-8 {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+  }
+  
+  .text-center {
+    text-align: center;
+  }
+  
+  .grid-cols-1 {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+  
+  .grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  
+  @media (min-width: 768px) {
+    .md\\:grid-cols-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  
+  @media (min-width: 1024px) {
+    .lg\\:grid-cols-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  
+  .overflow-auto {
+    overflow: auto;
+  }
+  
+  .overflow-y-auto {
+    overflow-y: auto;
+  }
+  
+  .flex-wrap {
+    flex-wrap: wrap;
+  }
+  
+  .bg-red-50 {
+    background-color: #fef2f2;
+  }
+  
+  .border-red-200 {
+    border-color: #fecaca;
+  }
+  
+  .text-red-700 {
+    color: #b91c1c;
+  }
+  
+  .bg-slate-900 {
+    background-color: #0f172a;
+  }
+  
+  .text-green-400 {
+    color: #4ade80;
+  }
+  
+  .text-slate-500 {
+    color: #64748b;
+  }
+  
+  .border-t {
+    border-top-width: 1px;
+  }
+  
+  .pt-3 {
+    padding-top: 0.75rem;
+  }
+  
+  .rounded-md {
+    border-radius: 0.375rem;
+  }
+  
+  .block {
+    display: block;
+  }
 </style>
