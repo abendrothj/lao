@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
-use lao_orchestrator_core::{run_workflow_yaml, load_workflow_yaml};
-use lao_orchestrator_core::plugins::PluginRegistry;
+use lao_orchestrator_core::{
+    run_workflow_yaml, load_workflow_yaml, plugins::PluginRegistry,
+    scheduler::WorkflowScheduler, workflow_state::WorkflowSchedule,
+};
 use lao_plugin_api::PluginInput;
 use serde::Deserialize;
 
@@ -79,6 +81,35 @@ enum Commands {
     /// Explain a plugin's capabilities, schemas, and usage examples
     ExplainPlugin {
         name: String,
+    },
+    /// Schedule a workflow to run at specified intervals
+    Schedule {
+        workflow_path: String,
+        #[arg(long, help = "Cron-like expression (e.g., 'interval:60' for every 60 minutes)")]
+        cron: String,
+        #[arg(long, help = "Maximum number of times to run (optional)")]
+        max_runs: Option<u32>,
+    },
+    /// Unschedule a workflow
+    Unschedule {
+        workflow_id: String,
+    },
+    /// List all scheduled workflows
+    ListScheduled,
+    /// Show workflow execution history and state
+    Status {
+        #[arg(help = "Workflow ID (optional - shows all if not specified)")]
+        workflow_id: Option<String>,
+    },
+    /// Clean up old workflow states
+    Cleanup {
+        #[arg(long, default_value = "168", help = "Remove states older than this many hours")]
+        max_age_hours: u64,
+    },
+    /// Run the workflow scheduler daemon
+    Daemon {
+        #[arg(long, default_value = "60", help = "Check interval in seconds")]
+        interval: u64,
     },
 }
 
@@ -379,6 +410,170 @@ fn main() {
                 } else {
                     println!("  - {:?}", examples);
                 }
+            }
+        }
+        Commands::Schedule { workflow_path, cron, max_runs } => {
+            let workflow_id = format!("scheduled_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..8].to_string());
+            
+            // Validate workflow exists
+            if !std::path::Path::new(&workflow_path).exists() {
+                eprintln!("[ERROR] Workflow file not found: {}", workflow_path);
+                std::process::exit(1);
+            }
+            
+            let schedule = WorkflowSchedule {
+                cron_expression: Some(cron.clone()),
+                next_run: None,
+                enabled: true,
+                max_runs,
+                run_count: 0,
+            };
+            
+            let mut scheduler = match WorkflowScheduler::new("workflow_states") {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize scheduler: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            
+            match scheduler.schedule_workflow(workflow_id.clone(), workflow_path.clone(), schedule) {
+                Ok(_) => {
+                    println!("✓ Scheduled workflow '{}' with ID: {}", workflow_path, workflow_id);
+                    println!("  Cron expression: {}", cron);
+                    if let Some(max) = max_runs {
+                        println!("  Max runs: {}", max);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to schedule workflow: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Unschedule { workflow_id } => {
+            let mut scheduler = match WorkflowScheduler::new("workflow_states") {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize scheduler: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            
+            match scheduler.unschedule_workflow(&workflow_id) {
+                Ok(_) => println!("✓ Unscheduled workflow: {}", workflow_id),
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to unschedule workflow: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::ListScheduled => {
+            let scheduler = match WorkflowScheduler::new("workflow_states") {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize scheduler: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            
+            let scheduled = scheduler.list_scheduled_workflows();
+            if scheduled.is_empty() {
+                println!("No scheduled workflows found.");
+            } else {
+                println!("Scheduled workflows:");
+                for (id, workflow) in scheduled {
+                    println!("  {} - {}", id, workflow.workflow_path);
+                    println!("    Schedule: {:?}", workflow.schedule.cron_expression);
+                    println!("    Next run: {:?}", workflow.next_run);
+                    println!("    Enabled: {}", workflow.schedule.enabled);
+                    if let Some(last) = workflow.last_run {
+                        println!("    Last run: {:?}", last);
+                    }
+                    println!("    Run count: {}", workflow.schedule.run_count);
+                    println!();
+                }
+            }
+        }
+        Commands::Status { workflow_id } => {
+            let scheduler = match WorkflowScheduler::new("workflow_states") {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize scheduler: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            
+            if let Some(id) = workflow_id {
+                match scheduler.get_workflow_history(&id) {
+                    Ok(Some(state)) => {
+                        println!("Workflow: {} ({})", state.workflow_name, state.workflow_id);
+                        println!("Status: {:?}", state.status);
+                        println!("Created: {:?}", state.created_at);
+                        if let Some(started) = state.started_at {
+                            println!("Started: {:?}", started);
+                        }
+                        if let Some(completed) = state.completed_at {
+                            println!("Completed: {:?}", completed);
+                        }
+                        println!("Progress: {}/{} steps", state.current_step, state.total_steps);
+                        if let Some(error) = &state.error_message {
+                            println!("Error: {}", error);
+                        }
+                    }
+                    Ok(None) => println!("Workflow not found: {}", id),
+                    Err(e) => eprintln!("[ERROR] Failed to load workflow state: {}", e),
+                }
+            } else {
+                let states = scheduler.list_workflow_states();
+                if states.is_empty() {
+                    println!("No workflow states found.");
+                } else {
+                    println!("All workflow states:");
+                    for state in states {
+                        println!("  {} - {} ({:?})", state.workflow_id, state.workflow_name, state.status);
+                    }
+                }
+            }
+        }
+        Commands::Cleanup { max_age_hours } => {
+            let mut scheduler = match WorkflowScheduler::new("workflow_states") {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize scheduler: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            
+            match scheduler.cleanup_old_states(max_age_hours) {
+                Ok(count) => println!("✓ Cleaned up {} old workflow states", count),
+                Err(e) => eprintln!("[ERROR] Failed to cleanup states: {}", e),
+            }
+        }
+        Commands::Daemon { interval } => {
+            println!("Starting LAO workflow scheduler daemon...");
+            println!("Check interval: {} seconds", interval);
+            
+            let mut scheduler = match WorkflowScheduler::new("workflow_states") {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize scheduler: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            
+            loop {
+                let due_workflows = scheduler.get_due_workflows();
+                if !due_workflows.is_empty() {
+                    println!("Found {} due workflows", due_workflows.len());
+                    for workflow_id in due_workflows {
+                        // In a real implementation, you'd execute the workflow here
+                        println!("Would execute workflow: {}", workflow_id);
+                        let _ = scheduler.update_workflow_run(&workflow_id);
+                    }
+                }
+                
+                std::thread::sleep(std::time::Duration::from_secs(interval));
             }
         }
     }

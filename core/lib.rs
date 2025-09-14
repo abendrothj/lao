@@ -14,6 +14,10 @@ use std::env as std_env;
 use std::ffi::CString;
 use lao_plugin_api::PluginInput;
 pub mod plugins;
+pub mod workflow_state;
+pub mod state_manager;
+pub mod scheduler;
+
 use plugins::*;
 use lao_plugin_api::{PluginInputType, PluginOutputType};
 
