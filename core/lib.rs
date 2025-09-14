@@ -1,9 +1,3 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {name}! You've been greeted from Rust!")
-}
-
 // --- Workflow Engine (Step 2) ---
 use std::fs;
 use std::process::Command;
@@ -14,6 +8,12 @@ use std::env as std_env;
 use std::ffi::CString;
 use lao_plugin_api::PluginInput;
 pub mod plugins;
+pub mod plugin_manager;
+pub mod plugin_dev_tools;
+pub mod workflow_state;
+pub mod state_manager;
+pub mod scheduler;
+
 use plugins::*;
 use lao_plugin_api::{PluginInputType, PluginOutputType};
 
@@ -110,7 +110,7 @@ pub fn run_model_runner(runner: &str, params: serde_yaml::Value) -> Result<Strin
 
 pub fn build_dag(steps: &[WorkflowStep]) -> Result<Vec<DagNode>, String> {
     let mut nodes = Vec::new();
-    for step in steps.iter() {
+    for (index, step) in steps.iter().enumerate() {
         let mut parents = Vec::new();
         if let Some(input_from) = &step.input_from {
             parents.push(input_from.clone());
@@ -118,8 +118,10 @@ pub fn build_dag(steps: &[WorkflowStep]) -> Result<Vec<DagNode>, String> {
         if let Some(depends_on) = &step.depends_on {
             parents.extend(depends_on.clone());
         }
+        // Use step{index+1} format for node IDs to match YAML conventions
+        let step_id = format!("step{}", index + 1);
         nodes.push(DagNode {
-            id: step.run.clone(),
+            id: step_id,
             step: step.clone(),
             parents,
         });
@@ -229,7 +231,7 @@ fn types_compatible(from: PluginOutputType, to: PluginInputType) -> bool {
 pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
     let workflow = load_workflow_yaml(path)?;
     let dag = build_dag(&workflow.steps)?;
-    let registry = PluginRegistry::dynamic_registry("../plugins/");
+    let registry = PluginRegistry::dynamic_registry("plugins/");
     
     // Validate workflow
     let errors = validate_workflow_types(&dag, &registry);
@@ -241,7 +243,7 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
     let execution_order = topo_sort(&dag)?;
     
     let mut logs = Vec::new();
-    let mut outputs = HashMap::new();
+    let mut outputs: HashMap<String, String> = HashMap::new();
     let start_time = Instant::now();
     
     for (step_idx, node_id) in execution_order.iter().enumerate() {
@@ -250,6 +252,28 @@ pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
         
         // Build input parameters
         let mut params = step.params.clone();
+        
+        // Handle input_from: use output from referenced step as input
+        if let Some(input_from) = &step.input_from {
+            if let Some(step_output) = outputs.get(input_from) {
+                // Override the input parameter with the referenced step's output
+                if let Some(mapping) = params.as_mapping_mut() {
+                    mapping.insert(
+                        serde_yaml::Value::String("input".to_string()),
+                        serde_yaml::Value::String(step_output.clone())
+                    );
+                } else {
+                    // Create new mapping if params wasn't a mapping
+                    let mut new_mapping = serde_yaml::Mapping::new();
+                    new_mapping.insert(
+                        serde_yaml::Value::String("input".to_string()),
+                        serde_yaml::Value::String(step_output.clone())
+                    );
+                    params = serde_yaml::Value::Mapping(new_mapping);
+                }
+            }
+        }
+        
         substitute_params(&mut params, &outputs);
         
         // Build plugin input
@@ -380,7 +404,7 @@ where
 {
     let workflow = load_workflow_yaml(path)?;
     let dag = build_dag(&workflow.steps)?;
-    let registry = PluginRegistry::dynamic_registry("../plugins/");
+    let registry = PluginRegistry::dynamic_registry("plugins/");
 
     let errors = validate_workflow_types(&dag, &registry);
     if !errors.is_empty() {
@@ -460,7 +484,7 @@ where
 }
 
 // Parallel execution by levels (nodes on same level run concurrently)
-pub fn run_workflow_yaml_parallel_with_callback<F>(path: &str, mut on_event: F) -> Result<Vec<StepLog>, String>
+pub fn run_workflow_yaml_parallel_with_callback<F>(path: &str, on_event: F) -> Result<Vec<StepLog>, String>
 where
     F: FnMut(StepEvent) + Send,
 {
@@ -508,12 +532,6 @@ fn build_plugin_input(params: &serde_yaml::Value) -> PluginInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_greet_function() {
-        let result = greet("World");
-        assert_eq!(result, "Hello, World! You've been greeted from Rust!");
-    }
 
     #[test]
     fn test_build_dag_simple() {

@@ -1,0 +1,24 @@
+{
+  "workflow_id": "scheduled_b2f35c7a",
+  "workflow_name": "Scheduled Workflow",
+  "status": "Scheduled",
+  "created_at": {
+    "secs_since_epoch": 1757838825,
+    "nanos_since_epoch": 209576711
+  },
+  "started_at": null,
+  "completed_at": null,
+  "current_step": 0,
+  "total_steps": 0,
+  "step_results": [],
+  "outputs": {},
+  "error_message": null,
+  "retry_count": 0,
+  "schedule": {
+    "cron_expression": "interval:30",
+    "next_run": null,
+    "enabled": true,
+    "max_runs": null,
+    "run_count": 0
+  }
+}
