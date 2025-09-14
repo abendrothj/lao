@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use lao_orchestrator_core::{
     run_workflow_yaml, load_workflow_yaml, plugins::PluginRegistry,
     scheduler::WorkflowScheduler, workflow_state::WorkflowSchedule,
+    plugin_manager::PluginManager, plugin_dev_tools::{PluginDevTools, PluginTemplate},
 };
 use lao_plugin_api::PluginInput;
 use serde::Deserialize;
@@ -110,6 +111,124 @@ enum Commands {
     Daemon {
         #[arg(long, default_value = "60", help = "Check interval in seconds")]
         interval: u64,
+    },
+    /// Plugin management commands
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum PluginCommands {
+    /// List installed plugins
+    List,
+    /// Install a plugin from marketplace or URL
+    Install {
+        /// Plugin name or URL
+        plugin: String,
+        /// Specific version (optional)
+        #[arg(long)]
+        version: Option<String>,
+    },
+    /// Uninstall a plugin
+    Uninstall {
+        /// Plugin name
+        plugin: String,
+    },
+    /// Search marketplace for plugins
+    Search {
+        /// Search query
+        query: String,
+        /// Filter by tags
+        #[arg(long)]
+        tags: Option<Vec<String>>,
+    },
+    /// Show plugin information and analytics
+    Info {
+        /// Plugin name
+        plugin: String,
+    },
+    /// Enable or disable a plugin
+    Toggle {
+        /// Plugin name
+        plugin: String,
+        /// Enable (true) or disable (false)
+        enabled: bool,
+    },
+    /// Hot reload a plugin
+    Reload {
+        /// Plugin name
+        plugin: String,
+    },
+    /// Update plugin configuration
+    Config {
+        /// Plugin name
+        plugin: String,
+        /// Configuration key
+        key: String,
+        /// Configuration value
+        value: String,
+    },
+    /// Create a new plugin from template
+    Create {
+        /// Plugin name
+        name: String,
+        /// Template type
+        #[arg(long, default_value = "basic")]
+        template: String,
+        /// Author name
+        #[arg(long)]
+        author: Option<String>,
+        /// Plugin description
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Build a plugin
+    Build {
+        /// Plugin directory path
+        #[arg(default_value = ".")]
+        path: String,
+        /// Build in release mode
+        #[arg(long)]
+        release: bool,
+    },
+    /// Test a plugin
+    Test {
+        /// Plugin directory path
+        #[arg(default_value = ".")]
+        path: String,
+        /// Test input
+        #[arg(long)]
+        input: Option<String>,
+    },
+    /// Validate plugin manifest and code
+    Validate {
+        /// Plugin directory path
+        #[arg(default_value = ".")]
+        path: String,
+    },
+    /// Package plugin for distribution
+    Package {
+        /// Plugin directory path
+        #[arg(default_value = ".")]
+        path: String,
+        /// Output package file
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Refresh marketplace cache
+    RefreshMarketplace,
+    /// Register event hooks for plugins
+    Hook {
+        /// Plugin name
+        plugin: String,
+        /// Event types to listen for
+        #[arg(long)]
+        events: Vec<String>,
+        /// Callback function name
+        #[arg(long)]
+        callback: String,
     },
 }
 
@@ -574,6 +693,299 @@ fn main() {
                 }
                 
                 std::thread::sleep(std::time::Duration::from_secs(interval));
+            }
+        }
+        Commands::Plugin { command } => {
+            handle_plugin_command(command);
+        }
+    }
+}
+
+fn handle_plugin_command(command: PluginCommands) {
+    match command {
+        PluginCommands::List => {
+            match PluginManager::new("plugins/") {
+                Ok(manager) => {
+                    let plugins = manager.list_plugins_with_status();
+                    if plugins.is_empty() {
+                        println!("No plugins installed.");
+                    } else {
+                        println!("Installed plugins:");
+                        for (name, enabled, info) in plugins {
+                            let status = if enabled { "✓" } else { "✗" };
+                            println!("  {} {} v{} - {}", status, name, info.version, info.description);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize plugin manager: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Install { plugin, version } => {
+            match PluginManager::new("plugins/") {
+                Ok(mut manager) => {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    match rt.block_on(manager.install_plugin(&plugin, version.as_deref())) {
+                        Ok(_) => println!("✓ Plugin installed successfully"),
+                        Err(e) => {
+                            eprintln!("[ERROR] Failed to install plugin: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize plugin manager: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Uninstall { plugin } => {
+            match PluginManager::new("plugins/") {
+                Ok(mut manager) => {
+                    match manager.uninstall_plugin(&plugin) {
+                        Ok(_) => println!("✓ Plugin uninstalled successfully"),
+                        Err(e) => {
+                            eprintln!("[ERROR] Failed to uninstall plugin: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize plugin manager: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Search { query, tags } => {
+            match PluginManager::new("plugins/") {
+                Ok(mut manager) => {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Err(e) = rt.block_on(manager.refresh_marketplace_cache()) {
+                        eprintln!("[WARNING] Failed to refresh marketplace: {}", e);
+                    }
+                    
+                    let results = manager.search_marketplace(&query, tags);
+                    if results.is_empty() {
+                        println!("No plugins found matching your search.");
+                    } else {
+                        println!("Found {} plugin(s):", results.len());
+                        for plugin in results {
+                            println!("\n📦 {} v{}", plugin.name, plugin.version);
+                            println!("   {}", plugin.description);
+                            println!("   Author: {}", plugin.author);
+                            println!("   Tags: {}", plugin.tags.join(", "));
+                            println!("   ⭐ {} ({} downloads)", plugin.ratings, plugin.download_count);
+                            if plugin.verified {
+                                println!("   ✅ Verified");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize plugin manager: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Info { plugin } => {
+            match PluginManager::new("plugins/") {
+                Ok(manager) => {
+                    if let Some(info) = manager.registry.plugins.get(&plugin) {
+                        println!("Plugin: {}", info.info.name);
+                        println!("Version: {}", info.info.version);
+                        println!("Description: {}", info.info.description);
+                        println!("Author: {}", info.info.author);
+                        println!("Tags: {}", info.info.tags.join(", "));
+                        
+                        if !info.info.capabilities.is_empty() {
+                            println!("\nCapabilities:");
+                            for cap in &info.info.capabilities {
+                                println!("  - {}: {}", cap.name, cap.description);
+                                println!("    Input: {:?}, Output: {:?}", cap.input_type, cap.output_type);
+                            }
+                        }
+                        
+                        if !info.info.dependencies.is_empty() {
+                            println!("\nDependencies:");
+                            for dep in &info.info.dependencies {
+                                let optional = if dep.optional { " (optional)" } else { "" };
+                                println!("  - {} v{}{}", dep.name, dep.version, optional);
+                            }
+                        }
+                        
+                        // Show analytics
+                        let analytics = manager.get_plugin_analytics(&plugin);
+                        if !analytics.is_empty() {
+                            println!("\nAnalytics:");
+                            for (key, value) in analytics {
+                                println!("  {}: {}", key, value);
+                            }
+                        }
+                        
+                        // Show configuration
+                        if let Some(config) = manager.get_plugin_config(&plugin) {
+                            println!("\nConfiguration:");
+                            println!("  Enabled: {}", config.enabled);
+                            println!("  Permissions: {}", config.permissions.join(", "));
+                            println!("  Resource limits:");
+                            println!("    Memory: {} MB", config.resource_limits.max_memory_mb);
+                            println!("    CPU: {}%", config.resource_limits.max_cpu_percent);
+                        }
+                    } else {
+                        eprintln!("[ERROR] Plugin '{}' not found", plugin);
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize plugin manager: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Toggle { plugin, enabled } => {
+            match PluginManager::new("plugins/") {
+                Ok(mut manager) => {
+                    match manager.set_plugin_enabled(&plugin, enabled) {
+                        Ok(_) => {
+                            let status = if enabled { "enabled" } else { "disabled" };
+                            println!("✓ Plugin '{}' {}", plugin, status);
+                        }
+                        Err(e) => {
+                            eprintln!("[ERROR] Failed to toggle plugin: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize plugin manager: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Reload { plugin } => {
+            match PluginManager::new("plugins/") {
+                Ok(mut manager) => {
+                    match manager.hot_reload_plugin(&plugin) {
+                        Ok(_) => println!("✓ Plugin '{}' reloaded successfully", plugin),
+                        Err(e) => {
+                            eprintln!("[ERROR] Failed to reload plugin: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize plugin manager: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Config { plugin, key, value } => {
+            match PluginManager::new("plugins/") {
+                Ok(mut manager) => {
+                    if let Some(mut config) = manager.get_plugin_config(&plugin).cloned() {
+                        // Parse value as JSON
+                        let json_value = match serde_json::from_str(&value) {
+                            Ok(v) => v,
+                            Err(_) => serde_json::Value::String(value), // Fallback to string
+                        };
+                        
+                        config.settings.insert(key.clone(), json_value);
+                        
+                        match manager.update_plugin_config(&plugin, config) {
+                            Ok(_) => println!("✓ Updated configuration '{}' for plugin '{}'", key, plugin),
+                            Err(e) => {
+                                eprintln!("[ERROR] Failed to update config: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("[ERROR] Plugin '{}' not found", plugin);
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize plugin manager: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Create { name, template, author, description } => {
+            let plugin_template = PluginTemplate::from_string(&template);
+            match PluginDevTools::create_plugin(&name, plugin_template, author.as_deref(), description.as_deref(), "plugins/") {
+                Ok(_) => println!("✓ Created new plugin: {}", name),
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to create plugin: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Build { path, release } => {
+            match PluginDevTools::build_plugin(&path, release) {
+                Ok(_) => println!("✓ Plugin built successfully"),
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to build plugin: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Test { path, input } => {
+            match PluginDevTools::test_plugin(&path, input.as_deref()) {
+                Ok(_) => println!("✓ All tests passed"),
+                Err(e) => {
+                    eprintln!("[ERROR] Tests failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Validate { path } => {
+            match PluginDevTools::validate_plugin(&path) {
+                Ok(_) => println!("✓ Plugin validation passed"),
+                Err(e) => {
+                    eprintln!("[ERROR] Validation failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Package { path, output } => {
+            match PluginDevTools::package_plugin(&path, output.as_deref()) {
+                Ok(_) => println!("✓ Plugin packaged successfully"),
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to package plugin: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::RefreshMarketplace => {
+            match PluginManager::new("plugins/") {
+                Ok(mut manager) => {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    match rt.block_on(manager.refresh_marketplace_cache()) {
+                        Ok(_) => println!("✓ Marketplace cache refreshed"),
+                        Err(e) => {
+                            eprintln!("[ERROR] Failed to refresh marketplace: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize plugin manager: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        PluginCommands::Hook { plugin, events, callback } => {
+            match PluginManager::new("plugins/") {
+                Ok(mut manager) => {
+                    manager.register_hook(plugin.clone(), events.clone(), callback.clone());
+                    println!("✓ Registered hook for plugin '{}' to listen for events: {}", plugin, events.join(", "));
+                    println!("  Callback function: {}", callback);
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Failed to initialize plugin manager: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
     }

@@ -1,9 +1,3 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {name}! You've been greeted from Rust!")
-}
-
 // --- Workflow Engine (Step 2) ---
 use std::fs;
 use std::process::Command;
@@ -14,6 +8,8 @@ use std::env as std_env;
 use std::ffi::CString;
 use lao_plugin_api::PluginInput;
 pub mod plugins;
+pub mod plugin_manager;
+pub mod plugin_dev_tools;
 pub mod workflow_state;
 pub mod state_manager;
 pub mod scheduler;
@@ -488,7 +484,7 @@ where
 }
 
 // Parallel execution by levels (nodes on same level run concurrently)
-pub fn run_workflow_yaml_parallel_with_callback<F>(path: &str, mut on_event: F) -> Result<Vec<StepLog>, String>
+pub fn run_workflow_yaml_parallel_with_callback<F>(path: &str, on_event: F) -> Result<Vec<StepLog>, String>
 where
     F: FnMut(StepEvent) + Send,
 {
@@ -536,12 +532,6 @@ fn build_plugin_input(params: &serde_yaml::Value) -> PluginInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_greet_function() {
-        let result = greet("World");
-        assert_eq!(result, "Hello, World! You've been greeted from Rust!");
-    }
 
     #[test]
     fn test_build_dag_simple() {
