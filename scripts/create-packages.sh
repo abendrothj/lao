@@ -232,8 +232,9 @@ create_rpm_package() {
     local spec_dir="$rpm_dir/SPECS"
     local build_dir="$rpm_dir/BUILD"
     local rpmbuild_dir="$rpm_dir/RPMS"
+    local sources_dir="$rpm_dir/SOURCES"
     
-    mkdir -p "$spec_dir" "$build_dir" "$rpmbuild_dir"
+    mkdir -p "$spec_dir" "$build_dir" "$rpmbuild_dir" "$sources_dir"
     
     # Create spec file
     cat > "$spec_dir/lao.spec" << EOF
@@ -294,19 +295,21 @@ EOF
 EOF
     
     # Create source tarball
-    tar -czf "$rpm_dir/SOURCES/lao-$VERSION.tar.gz" \
+    tar -czf "$sources_dir/lao-$VERSION.tar.gz" \
         --exclude=target \
         --exclude=.git \
         --exclude=dist \
         -C "$ROOT_DIR" .
     
     # Build RPM
-    rpmbuild --define "_topdir $rpm_dir" -ba "$spec_dir/lao.spec"
-    
-    # Copy built RPM
-    cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
-    
-    echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
+    if rpmbuild --define "_topdir $rpm_dir" -ba "$spec_dir/lao.spec"; then
+        # Copy built RPM
+        cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
+        echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
+    else
+        echo "❌ RPM build failed"
+        return 1
+    fi
 }
 
 # Function to create tar archive
