@@ -149,10 +149,24 @@ impl PathUtils {
             return PathBuf::from(plugin_dir);
         }
         
-        // Default to plugins/ relative to current directory
-        env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join("plugins")
+        // Get current directory
+        let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        
+        // Check if we're in a subdirectory (like core/) and plugins/ exists in parent
+        let plugins_in_current = current_dir.join("plugins");
+        let plugins_in_parent = current_dir.parent().map(|p| p.join("plugins"));
+        
+        if plugins_in_current.exists() {
+            plugins_in_current
+        } else if let Some(parent_plugins) = plugins_in_parent {
+            if parent_plugins.exists() {
+                parent_plugins
+            } else {
+                plugins_in_current
+            }
+        } else {
+            plugins_in_current
+        }
     }
     
     /// Get the LAO cache directory

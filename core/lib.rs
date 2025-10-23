@@ -276,7 +276,7 @@ fn types_compatible(from: PluginOutputType, to: PluginInputType) -> bool {
 pub fn run_workflow_yaml(path: &str) -> Result<Vec<StepLog>, String> {
     let workflow = load_workflow_yaml(path)?;
     let dag = build_dag(&workflow.steps)?;
-    let registry = PluginRegistry::dynamic_registry("plugins/");
+    let registry = PluginRegistry::default_registry();
     
     // Validate workflow
     let errors = validate_workflow_types(&dag, &registry);
@@ -449,7 +449,7 @@ where
 {
     let workflow = load_workflow_yaml(path)?;
     let dag = build_dag(&workflow.steps)?;
-    let registry = PluginRegistry::dynamic_registry("plugins/");
+    let registry = PluginRegistry::default_registry();
 
     let errors = validate_workflow_types(&dag, &registry);
     if !errors.is_empty() {
