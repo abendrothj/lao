@@ -1,0 +1,103 @@
+# Cross-platform configuration for LAO
+# This file defines platform-specific settings and build configurations
+
+[platform]
+# Default plugin directory (relative to workspace root)
+plugin_dir = "plugins"
+
+# Platform-specific shared library extensions
+[platform.extensions]
+linux = "so"
+macos = "dylib"
+windows = "dll"
+
+# Platform-specific build settings
+[platform.build]
+# Rust target triplets for cross-compilation
+linux = "x86_64-unknown-linux-gnu"
+macos = "x86_64-apple-darwin"
+windows = "x86_64-pc-windows-msvc"
+
+# Platform-specific dependencies
+[platform.dependencies]
+linux = [
+    "libgtk-3-dev",
+    "libwebkit2gtk-4.1-dev", 
+    "libappindicator3-dev",
+    "librsvg2-dev",
+    "patchelf",
+    "pkg-config"
+]
+macos = [
+    "cmake",
+    "pkg-config"
+]
+windows = [
+    "cmake",
+    "pkg-config"
+]
+
+# Plugin build configuration
+[plugins]
+# Build all plugins by default
+build_all = true
+
+# Plugins to build (empty = build all)
+include = []
+
+# Plugins to exclude from build
+exclude = []
+
+# Plugin-specific settings
+[plugins.echo]
+enabled = true
+description = "Simple echo plugin for testing"
+
+[plugins.whisper]
+enabled = true
+description = "Speech-to-text transcription"
+dependencies = ["whisper.cpp"]
+
+[plugins.ollama]
+enabled = true
+description = "Local LLM integration"
+dependencies = ["ollama"]
+
+[plugins.gguf]
+enabled = true
+description = "GGUF model support"
+
+[plugins.lmstudio]
+enabled = true
+description = "LM Studio integration"
+
+[plugins.summarizer]
+enabled = true
+description = "Text summarization"
+
+[plugins.prompt_dispatcher]
+enabled = true
+description = "Workflow generation from prompts"
+dependencies = ["ollama"]
+
+# Cross-platform testing
+[testing]
+# Run tests on all platforms
+cross_platform = true
+
+# Platform-specific test configurations
+[testing.platforms]
+linux = { test_ui = true, test_cli = true }
+macos = { test_ui = true, test_cli = true }
+windows = { test_ui = true, test_cli = true }
+
+# Deployment configuration
+[deployment]
+# Create platform-specific packages
+create_packages = true
+
+# Package formats per platform
+[deployment.packages]
+linux = ["tar.gz", "deb", "rpm"]
+macos = ["dmg", "tar.gz"]
+windows = ["msi", "zip"]

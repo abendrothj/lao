@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use lao_plugin_api::*;
 use libloading::{Library, Symbol};
+use crate::cross_platform::{Platform, PathUtils};
 
 #[derive(Debug, Clone)]
 pub struct PluginInstance {
@@ -83,6 +84,12 @@ impl PluginRegistry {
         registry
     }
     
+    /// Create a dynamic registry using the default plugin directory
+    pub fn default_registry() -> Self {
+        let plugin_dir = PathUtils::plugin_dir();
+        Self::dynamic_registry(plugin_dir.to_str().unwrap_or("plugins"))
+    }
+    
     pub fn load_plugins_from_directory(&mut self, plugin_dir: &str) {
         if let Ok(entries) = std::fs::read_dir(plugin_dir) {
             for entry in entries.filter_map(|e| e.ok()) {
@@ -93,22 +100,42 @@ impl PluginRegistry {
                         for f in files.filter_map(|e| e.ok()) {
                             let fpath = f.path();
                             if let Some(ext) = fpath.extension().and_then(|s| s.to_str()) {
-                                if matches!(ext, "so" | "dylib" | "dll") {
-                                    if let Ok(plugin) = self.load_plugin(&fpath) {
-                                        self.register_plugin(plugin);
+                                if self.is_shared_library_extension(ext) {
+                                    match self.load_plugin(&fpath) {
+                                        Ok(plugin) => {
+                                            self.register_plugin(plugin);
+                                        }
+                                        Err(e) => {
+                                            println!("[ERROR] Failed to load plugin {}: {}", fpath.display(), e);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                } else if matches!(path.extension().and_then(|s| s.to_str()), Some("dll") | Some("so") | Some("dylib")) {
+                } else if self.is_shared_library_file(&path) {
                     // Direct shared library loading across platforms
-                    if let Ok(plugin) = self.load_plugin(&path) {
-                        self.register_plugin(plugin);
+                    match self.load_plugin(&path) {
+                        Ok(plugin) => {
+                            self.register_plugin(plugin);
+                        }
+                        Err(e) => {
+                            println!("[ERROR] Failed to load plugin {}: {}", path.display(), e);
+                        }
                     }
                 }
             }
         }
+    }
+    
+    /// Check if file extension is a shared library extension for current platform
+    fn is_shared_library_extension(&self, ext: &str) -> bool {
+        Platform::is_shared_lib_extension(ext)
+    }
+    
+    /// Check if file is a shared library for current platform
+    fn is_shared_library_file(&self, path: &std::path::Path) -> bool {
+        Platform::is_shared_lib_file(path)
     }
     
     pub fn load_plugin(&self, dll_path: &Path) -> Result<PluginInstance, String> {

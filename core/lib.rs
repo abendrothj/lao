@@ -13,6 +13,7 @@ pub mod plugin_dev_tools;
 pub mod workflow_state;
 pub mod state_manager;
 pub mod scheduler;
+pub mod cross_platform;
 
 use plugins::*;
 use lao_plugin_api::{PluginInputType, PluginOutputType};
