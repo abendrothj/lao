@@ -331,17 +331,29 @@ pub fn run_workflow_stream(
 }
 
 pub fn save_workflow_yaml(graph: &WorkflowGraph, filename: &str) -> Result<(), String> {
+    // Build dependency info from edges
+    let mut incoming: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for e in &graph.edges {
+        incoming.entry(e.to.clone()).or_default().push(e.from.clone());
+    }
+
     let workflow = lao_orchestrator_core::Workflow {
         workflow: filename.trim_end_matches(".yaml").to_string(),
         steps: graph.nodes.iter().map(|node| {
+            let mut deps = incoming.get(&node.id).cloned().unwrap_or_default();
+            // input_from = first predecessor if any
+            let input_from = deps.get(0).cloned();
+            // remaining predecessors are depends_on
+            let depends_on = if deps.len() > 1 { Some(deps[1..].to_vec()) } else { None };
+            
             lao_orchestrator_core::WorkflowStep {
                 run: node.run.clone(),
                 params: serde_yaml::Value::Null, // Could be enhanced to support parameters
                 retries: None,
                 retry_delay: None,
                 cache_key: None,
-                input_from: None,
-                depends_on: None, // Could be enhanced to support dependencies from edges
+                input_from,
+                depends_on,
                 condition: None,
                 on_success: None,
                 on_failure: None,
@@ -355,25 +367,59 @@ pub fn save_workflow_yaml(graph: &WorkflowGraph, filename: &str) -> Result<(), S
 }
 
 pub fn export_workflow_yaml(graph: &WorkflowGraph) -> Result<String, String> {
-    let workflow = lao_orchestrator_core::Workflow {
-        workflow: "generated_workflow".to_string(),
-        steps: graph.nodes.iter().map(|node| {
-            lao_orchestrator_core::WorkflowStep {
-                run: node.run.clone(),
-                params: serde_yaml::Value::Null,
-                retries: None,
-                retry_delay: None,
-                cache_key: None,
-                input_from: None,
-                depends_on: None,
-                condition: None,
-                on_success: None,
-                on_failure: None,
-            }
-        }).collect(),
-    };
+    let mut yaml = String::new();
+    yaml.push_str("workflow: generated_workflow\n");
+    yaml.push_str("steps:\n");
     
-    serde_yaml::to_string(&workflow).map_err(|e| e.to_string())
+    // Create a map of node incoming edges (predecessors)
+    let mut incoming: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for edge in &graph.edges {
+        incoming.entry(edge.to.clone()).or_default().push(edge.from.clone());
+    }
+    
+    // Create a map of node ID to step index for proper step naming
+    let mut node_to_step: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (index, node) in graph.nodes.iter().enumerate() {
+        node_to_step.insert(node.id.clone(), index);
+    }
+    
+    for (_step_index, node) in graph.nodes.iter().enumerate() {
+        yaml.push_str(&format!("- run: {}\n", node.run));
+        
+        // Add input_from and depends_on if this node has predecessors
+        if let Some(preds) = incoming.get(&node.id) {
+            if !preds.is_empty() {
+                // input_from = first predecessor (export order is influenced by UI piping selection)
+                if let Some(first) = preds.get(0) {
+                    if let Some(&idx) = node_to_step.get(first) {
+                        yaml.push_str(&format!("  input_from: step{}\n", idx + 1));
+                    }
+                }
+                if preds.len() > 1 {
+                    let step_deps: Vec<String> = preds[1..].iter()
+                        .filter_map(|dep_id| node_to_step.get(dep_id))
+                        .map(|&dep_index| format!("step{}", dep_index + 1))
+                        .collect();
+                    if !step_deps.is_empty() {
+                        yaml.push_str(&format!("  depends_on: [{}]\n", step_deps.join(", ")));
+                    }
+                }
+            }
+        }
+        
+        // Only add fields that have meaningful values
+        if let Some(ref input_type) = node.input_type {
+            yaml.push_str(&format!("  input_type: {}\n", input_type));
+        }
+        if let Some(ref output_type) = node.output_type {
+            yaml.push_str(&format!("  output_type: {}\n", output_type));
+        }
+        if node.status != "pending" {
+            yaml.push_str(&format!("  status: {}\n", node.status));
+        }
+    }
+    
+    Ok(yaml)
 }
 
 // Handle file upload for multi-modal input

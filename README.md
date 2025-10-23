@@ -2,7 +2,7 @@
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Made with Rust](https://img.shields.io/badge/Made%20with-Rust-orange?logo=rust)
-![Powered by Tauri](https://img.shields.io/badge/Powered%20by-Tauri-blueviolet?logo=tauri)
+![Native GUI](https://img.shields.io/badge/GUI-Native%20Rust-green?logo=rust)
 ![Runs Offline](https://img.shields.io/badge/Runs-Offline-success?logo=powerbi&logoColor=white)
 
 > Chain. Build. Run. All offline.
@@ -40,10 +40,8 @@ LAO is a cross-platform desktop tool for chaining local AI models and plugins in
 ## 🚀 Quickstart
 
 ```sh
-# Set up the UI
-cd ui/lao-ui
-npm install
-npm run tauri dev
+# Run the native GUI
+cargo run --bin lao-ui
 
 # Run the CLI
 cargo run --bin lao-cli run workflows/test.yaml
