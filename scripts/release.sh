@@ -6,7 +6,7 @@ set -euo pipefail
 # Enhanced for longevity with automatic version bumping and better error handling
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-CURRENT_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*= *"\(.*\)".*/\1/' || echo "0.1.0")
+CURRENT_VERSION=$(grep '^version' core/Cargo.toml | head -1 | sed 's/.*= *"\(.*\)".*/\1/' || echo "0.1.0")
 
 # Default to current version, but allow override
 VERSION="${1:-$CURRENT_VERSION}"
@@ -40,22 +40,42 @@ calculate_next_version() {
     esac
 }
 
-# Function to update version in Cargo.toml
+# Function to update version in Cargo.toml files
 update_version() {
     local new_version="$1"
-    local cargo_file="$ROOT_DIR/Cargo.toml"
+    local cargo_files=(
+        "core/Cargo.toml"
+        "cli/Cargo.toml"
+        "lao_plugin_api/Cargo.toml"
+        "ui/lao-ui/Cargo.toml"
+        "tools/plugin-generator/Cargo.toml"
+        "tools/plugin-registry/Cargo.toml"
+        "plugins/EchoPlugin/Cargo.toml"
+        "plugins/WhisperPlugin/Cargo.toml"
+        "plugins/OllamaPlugin/Cargo.toml"
+        "plugins/PromptDispatcherPlugin/Cargo.toml"
+        "plugins/SummarizerPlugin/Cargo.toml"
+        "plugins/LMStudioPlugin/Cargo.toml"
+        "plugins/GGUFPlugin/Cargo.toml"
+        "plugins/plugin-template/Cargo.toml"
+    )
     
-    echo "📝 Updating version to $new_version in Cargo.toml..."
+    echo "📝 Updating version to $new_version in all Cargo.toml files..."
     
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS
-        sed -i '' "s/^version = \".*\"/version = \"$new_version\"/" "$cargo_file"
-    else
-        # Linux
-        sed -i "s/^version = \".*\"/version = \"$new_version\"/" "$cargo_file"
-    fi
+    for cargo_file in "${cargo_files[@]}"; do
+        if [[ -f "$ROOT_DIR/$cargo_file" ]]; then
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                # macOS
+                sed -i '' "s/^version = \".*\"/version = \"$new_version\"/" "$ROOT_DIR/$cargo_file"
+            else
+                # Linux
+                sed -i "s/^version = \".*\"/version = \"$new_version\"/" "$ROOT_DIR/$cargo_file"
+            fi
+            echo "✅ Updated $cargo_file"
+        fi
+    done
     
-    echo "✅ Version updated to $new_version"
+    echo "✅ All versions updated to $new_version"
 }
 
 # Function to check if version is valid semver
@@ -278,7 +298,7 @@ main() {
     if [[ "$version" != "$CURRENT_VERSION" ]]; then
         update_version "$version"
         echo "📝 Committing version change..."
-        git add Cargo.toml
+        git add core/Cargo.toml cli/Cargo.toml lao_plugin_api/Cargo.toml ui/lao-ui/Cargo.toml tools/plugin-generator/Cargo.toml tools/plugin-registry/Cargo.toml plugins/*/Cargo.toml
         git commit -m "Bump version to $version" || echo "⚠️  No changes to commit"
     fi
     
