@@ -3,7 +3,7 @@ name = "lao-plugin-registry"
 version = "0.1.0"
 edition = "2021"
 description = "LAO Plugin Registry Server"
-authors = ["LAO Contributors"]
+authors = ["Jake Abendroth <contact@jakea.net>"]
 
 [dependencies]
 actix-web = "4.0"

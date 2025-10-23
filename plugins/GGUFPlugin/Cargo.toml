@@ -3,7 +3,7 @@ name = "gguf_plugin"
 version = "0.1.0"
 edition = "2021"
 description = "Offline LLM via GGUF"
-authors = ["LAO Contributors"]
+authors = ["Jake Abendroth <contact@jakea.net>"]
 
 [lib]
 crate-type = ["cdylib"]

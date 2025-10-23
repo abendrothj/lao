@@ -3,7 +3,7 @@ name = "lao-cli"
 version = "0.1.0"
 edition = "2021"
 description = "Command-line interface for LAO - Local AI Orchestrator"
-authors = ["LAO Contributors"]
+authors = ["Jake Abendroth <contact@jakea.net>"]
 
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }

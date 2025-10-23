@@ -2,7 +2,7 @@
 name = "lao-orchestrator-core"
 version = "0.1.0"
 description = "Core DAG engine and backend for LAO Orchestrator"
-authors = ["LAO Contributors"]
+authors = ["Jake Abendroth <contact@jakea.net>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

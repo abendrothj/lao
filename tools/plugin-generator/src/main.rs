@@ -254,10 +254,10 @@ fn get_default_config(name: &str) -> PluginConfig {
         name: name.to_string(),
         version: "0.1.0".to_string(),
         description: format!("A LAO plugin for {}", name.replace('-', " ")),
-        author: "Your Name".to_string(),
-        email: "your.email@example.com".to_string(),
+        author: "Jake Abendroth".to_string(),
+        email: "contact@jakea.net".to_string(),
         license: "MIT".to_string(),
-        repository: format!("https://github.com/yourusername/{}", name),
+        repository: format!("https://github.com/abendrothj/{}", name),
         tags: vec!["plugin".to_string(), "lao".to_string()],
         capabilities: vec![
             Capability {

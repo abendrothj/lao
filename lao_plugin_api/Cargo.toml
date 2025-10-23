@@ -3,7 +3,7 @@ name = "lao_plugin_api"
 version = "0.1.0"
 edition = "2021"
 description = "API for LAO plugins"
-authors = ["LAO Contributors"]
+authors = ["Jake Abendroth <contact@jakea.net>"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

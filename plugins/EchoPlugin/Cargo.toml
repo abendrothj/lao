@@ -3,7 +3,7 @@ name = "echo_plugin"
 version = "0.1.0"
 edition = "2021"
 description = "Echoes the input as output"
-authors = ["LAO Contributors"]
+authors = ["Jake Abendroth <contact@jakea.net>"]
 
 [dependencies]
 lao_plugin_api = { path = "../../lao_plugin_api" } 

@@ -523,7 +523,7 @@ curl -X POST http://localhost:8080/plugins/{id}/upload \
 name: "MyAwesomePlugin"
 version: "1.0.0"
 description: "A plugin that does awesome things"
-author: "Your Name <your.email@example.com>"
+author: "Jake Abendroth <contact@jakea.net>"
 license: "MIT"
 repository: "https://github.com/yourusername/my-awesome-plugin"
 tags: ["ai", "processing", "awesome"]

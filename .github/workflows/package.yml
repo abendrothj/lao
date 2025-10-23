@@ -1,0 +1,188 @@
+name: Cross-Platform Packaging
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build for'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - linux
+        - macos
+        - windows
+
+jobs:
+  package-linux:
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+        override: true
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf pkg-config
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build release
+      run: |
+        cargo build --release --bin lao-cli
+        cargo build --release --bin lao-ui
+    
+    - name: Build plugins
+      run: bash scripts/build-plugins.sh
+    
+    - name: Create packages
+      run: bash scripts/create-packages.sh
+    
+    - name: Upload Linux packages
+      uses: actions/upload-artifact@v3
+      with:
+        name: linux-packages
+        path: |
+          dist/*.deb
+          dist/*.rpm
+          dist/*.tar.gz
+          dist/AppImage/
+        retention-days: 30
+
+  package-macos:
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' }}
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+        override: true
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build release
+      run: |
+        cargo build --release --bin lao-cli
+        cargo build --release --bin lao-ui
+    
+    - name: Build plugins
+      run: bash scripts/build-plugins.sh
+    
+    - name: Create packages
+      run: bash scripts/create-packages.sh
+    
+    - name: Upload macOS packages
+      uses: actions/upload-artifact@v3
+      with:
+        name: macos-packages
+        path: |
+          dist/*.dmg
+          dist/*.tar.gz
+        retention-days: 30
+
+  package-windows:
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows' }}
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+        override: true
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build release
+      run: |
+        cargo build --release --bin lao-cli
+        cargo build --release --bin lao-ui
+    
+    - name: Build plugins
+      run: bash scripts/build-plugins.sh
+    
+    - name: Create packages
+      run: bash scripts/create-packages.sh
+    
+    - name: Upload Windows packages
+      uses: actions/upload-artifact@v3
+      with:
+        name: windows-packages
+        path: |
+          dist/*.msi
+          dist/*.zip
+        retention-days: 30
+
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [package-linux, package-macos, package-windows]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download all packages
+      uses: actions/download-artifact@v3
+      with:
+        path: packages/
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          packages/linux-packages/*
+          packages/macos-packages/*
+          packages/windows-packages/*
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

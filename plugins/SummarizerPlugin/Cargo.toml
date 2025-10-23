@@ -3,7 +3,7 @@ name = "summarizer_plugin"
 version = "0.1.0"
 edition = "2021"
 description = "Summarizes input text using a local LLM"
-authors = ["LAO Contributors"]
+authors = ["Jake Abendroth <contact@jakea.net>"]
 
 [lib]
 crate-type = ["cdylib"]

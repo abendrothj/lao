@@ -1,0 +1,121 @@
+# Cargo configuration for cross-platform packaging
+# This file configures Cargo for different packaging targets
+
+[package]
+name = "lao"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jake Abendroth <contact@jakea.net>"]
+description = "Local AI Workflow Orchestrator"
+license = "MIT"
+repository = "https://github.com/abendrothj/lao"
+homepage = "https://github.com/abendrothj/lao"
+keywords = ["ai", "workflow", "orchestrator", "local", "offline"]
+categories = ["development-tools", "command-line-utilities"]
+
+# Platform-specific build configurations
+[target.'cfg(target_os = "linux")']
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.'cfg(target_os = "windows")']
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# Cross-compilation targets
+[target.x86_64-unknown-linux-gnu]
+linker = "x86_64-linux-gnu-gcc"
+
+[target.x86_64-pc-windows-msvc]
+linker = "x86_64-w64-mingw32-gcc"
+
+[target.x86_64-apple-darwin]
+linker = "x86_64-apple-darwin-gcc"
+
+# Package metadata for different platforms
+[package.metadata.deb]
+maintainer = "Jake Abendroth <contact@jakea.net>"
+section = "devel"
+priority = "optional"
+depends = "libc6, libgtk-3-0, libwebkit2gtk-4.0-37"
+suggests = "ollama, whisper.cpp"
+conflicts = ""
+replaces = ""
+
+[package.metadata.rpm]
+license = "MIT"
+group = "Development/Tools"
+requires = "gtk3, webkit2gtk3"
+suggests = "ollama, whisper.cpp"
+conflicts = ""
+obsoletes = ""
+
+[package.metadata.msi]
+manufacturer = "Jake Abendroth"
+upgrade-code = "12345678-1234-1234-1234-123456789012"
+installer-version = "200"
+compressed = true
+install-scope = "perMachine"
+
+[package.metadata.dmg]
+volume-name = "LAO"
+applications-folder = true
+background-image = "assets/dmg-background.png"
+window-size = "600,400"
+window-position = "200,200"
+icon-size = "128"
+text-size = "16"
+icon-text-size = "12"
+
+# AppImage metadata
+[package.metadata.appimage]
+name = "LAO"
+comment = "Local AI Workflow Orchestrator"
+version = "0.1.0"
+exec = "lao-ui"
+icon = "assets/lao-icon.png"
+categories = "Development;Utility;"
+keywords = "ai,workflow,orchestrator,local,offline"
+mime-types = "application/x-yaml;text/yaml;"
+startup-notify = true
+startup-wm-class = "LAO"
+
+# Cross-platform dependencies
+[dependencies]
+# Core dependencies (same across all platforms)
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+clap = { version = "4.0", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Platform-specific dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["winuser", "shellapi"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.9"
+core-graphics = "0.23"
+
+# UI dependencies
+[target.'cfg(feature = "ui")'.dependencies]
+egui = "0.29"
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
+
+# CLI dependencies
+[target.'cfg(feature = "cli")'.dependencies]
+clap = { version = "4.0", features = ["derive", "color", "suggestions"] }
+indicatif = "0.17"
+console = "0.15"
+
+# Plugin system dependencies
+[target.'cfg(feature = "plugins")'.dependencies]
+libloading = "0.8"
+lao_plugin_api = { path = "lao_plugin_api" }
+
+# Build dependencies
+[build-dependencies]
+vergen = { version = "8.0", features = ["git", "git2"] }

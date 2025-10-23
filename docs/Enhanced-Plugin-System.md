@@ -180,7 +180,7 @@ lao plugin hook my-plugin --events data_processed,model_updated --callback handl
 name = "MyAwesomePlugin"
 version = "1.0.0"
 description = "A plugin that does awesome things"
-author = "Plugin Developer <dev@example.com>"
+author = "Plugin Developer <contact@jakea.net>"
 license = "MIT"
 repository = "https://github.com/user/my-awesome-plugin"
 homepage = "https://my-awesome-plugin.com"

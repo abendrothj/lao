@@ -84,7 +84,7 @@ my-awesome-plugin/
 name: "MyAwesomePlugin"
 version: "0.1.0"
 description: "A plugin that does awesome things"
-author: "Your Name <your.email@example.com>"
+author: "Jake Abendroth <contact@jakea.net>"
 license: "MIT"
 repository: "https://github.com/yourusername/my-awesome-plugin"
 tags: ["ai", "processing", "awesome"]
@@ -125,7 +125,7 @@ impl Default for PluginConfig {
             name: "MyAwesomePlugin".to_string(),
             version: "0.1.0".to_string(),
             description: "A plugin that does awesome things".to_string(),
-            author: "Your Name <your.email@example.com>".to_string(),
+            author: "Jake Abendroth <contact@jakea.net>".to_string(),
             tags: vec!["ai".to_string(), "processing".to_string()],
             capabilities: vec![
                 PluginCapability {

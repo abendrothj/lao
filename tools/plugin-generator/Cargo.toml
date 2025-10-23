@@ -3,7 +3,7 @@ name = "lao-plugin-generator"
 version = "0.1.0"
 edition = "2021"
 description = "Generate LAO plugin templates and scaffolding"
-authors = ["LAO Contributors"]
+authors = ["Jake Abendroth <contact@jakea.net>"]
 
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }

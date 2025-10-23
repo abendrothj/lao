@@ -23,7 +23,7 @@ impl Default for PluginConfig {
             name: "PluginTemplate".to_string(),
             version: "0.1.0".to_string(),
             description: "A template plugin for LAO".to_string(),
-            author: "Your Name <you@example.com>".to_string(),
+            author: "Jake Abendroth <contact@jakea.net>".to_string(),
             tags: vec!["template".to_string(), "example".to_string()],
             capabilities: vec![
                 PluginCapability {
