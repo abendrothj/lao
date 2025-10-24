@@ -301,13 +301,22 @@ EOF
         --exclude=dist \
         -C "$ROOT_DIR" .
     
+    # Check if rpmbuild is available
+    if ! command -v rpmbuild >/dev/null 2>&1; then
+        echo "⚠️  rpmbuild not found, skipping RPM package creation"
+        echo "💡 Install rpm-build package to enable RPM creation"
+        return 0
+    fi
+    
     # Build RPM
-    if rpmbuild --define "_topdir $rpm_dir" -ba "$spec_dir/lao.spec"; then
+    echo "🔨 Building RPM package..."
+    if rpmbuild --define "_topdir $rpm_dir" -ba "$spec_dir/lao.spec" 2>&1; then
         # Copy built RPM
         cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
         echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
     else
-        echo "❌ RPM build failed"
+        echo "❌ RPM build failed - this may be due to missing dependencies"
+        echo "💡 Try installing: sudo apt-get install rpm-build"
         return 1
     fi
 }
