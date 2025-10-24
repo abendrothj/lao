@@ -1,6 +1,6 @@
 [package]
 name = "gguf_plugin"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 description = "Offline LLM via GGUF"
 authors = ["Jake Abendroth <contact@jakea.net>"]
