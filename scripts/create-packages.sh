@@ -310,6 +310,8 @@ EOF
     
     # Build RPM
     echo "🔨 Building RPM package..."
+    # Disable job control to prevent fg/bg issues in CI environments
+    set +m
     if rpmbuild --define "_topdir $rpm_dir" -ba "$spec_dir/lao.spec" 2>&1; then
         # Copy built RPM
         cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
@@ -319,6 +321,7 @@ EOF
         echo "💡 Try installing: sudo apt-get install rpm-build"
         return 1
     fi
+    set -m
 }
 
 # Function to create tar archive
