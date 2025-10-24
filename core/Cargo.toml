@@ -1,6 +1,6 @@
 [package]
 name = "lao-orchestrator-core"
-version = "0.1.6"
+version = "0.1.7"
 description = "Core DAG engine and backend for LAO Orchestrator"
 authors = ["Jake Abendroth <contact@jakea.net>"]
 edition = "2021"
