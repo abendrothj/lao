@@ -1,6 +1,6 @@
 [package]
 name = "lmstudio_plugin"
-version = "0.1.15"
+version = "0.1.16"
 edition = "2021"
 description = "Offline LLM via LM Studio"
 authors = ["Jake Abendroth <contact@jakea.net>"]

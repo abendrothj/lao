@@ -1,6 +1,6 @@
 [package]
 name = "summarizer_plugin"
-version = "0.1.15"
+version = "0.1.16"
 edition = "2021"
 description = "Summarizes input text using a local LLM"
 authors = ["Jake Abendroth <contact@jakea.net>"]
