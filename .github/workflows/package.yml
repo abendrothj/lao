@@ -17,6 +17,9 @@ on:
         - macos
         - windows
 
+permissions:
+  contents: write
+
 jobs:
   package-linux:
     if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux') || github.event_name == 'push' }}
