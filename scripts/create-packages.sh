@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Disable job control globally to prevent fg/bg issues in CI environments
+set +m
 
 # Cross-platform packaging script for LAO
 # Creates platform-specific packages for distribution
@@ -310,19 +312,28 @@ EOF
     
     # Build RPM
     echo "🔨 Building RPM package..."
-    # Run rpmbuild in a subshell with job control disabled
-    (
-        set +m
-        if rpmbuild --define "_topdir $rpm_dir" -ba "$spec_dir/lao.spec" 2>&1; then
-            # Copy built RPM
+    
+    # Industry standard approach: Ensure completely non-interactive environment
+    # This prevents job control issues by running in a clean environment
+    echo "Debug: Running rpmbuild in clean non-interactive environment..."
+    
+    # Run rpmbuild with explicit non-interactive flags and clean environment
+    if SHELL=/bin/false rpmbuild --define "_topdir $rpm_dir" -ba "$spec_dir/lao.spec" 2>&1; then
+        # Copy built RPM
+        cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
+        echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
+    else
+        echo "❌ RPM build failed - trying alternative approach..."
+        # Try building binary-only package with same approach
+        if SHELL=/bin/false rpmbuild --define "_topdir $rpm_dir" -bb "$spec_dir/lao.spec" 2>&1; then
             cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
-            echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
+            echo "✅ RPM package created (binary only): $DIST_DIR/lao-$VERSION-1.*.rpm"
         else
             echo "❌ RPM build failed - this may be due to missing dependencies"
             echo "💡 Try installing: sudo apt-get install rpm-build"
             return 1
         fi
-    )
+    fi
 }
 
 # Function to create tar archive
