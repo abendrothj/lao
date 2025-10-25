@@ -493,6 +493,10 @@ create_dmg_package() {
     mkdir -p "$app_dir/Contents/PlugIns/plugins"
     cp plugins/*.dylib "$app_dir/Contents/PlugIns/plugins/" 2>/dev/null || true
     
+    # Set proper permissions
+    chmod +x "$app_dir/Contents/MacOS/lao-cli"
+    chmod +x "$app_dir/Contents/MacOS/lao-ui"
+    
     # Create Info.plist
     cat > "$app_dir/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -521,10 +525,74 @@ create_dmg_package() {
 </plist>
 EOF
     
-    # Create DMG
-    hdiutil create -volname "LAO $VERSION" -srcfolder "$dmg_dir" -ov -format UDZO "$DIST_DIR/LAO-$VERSION.dmg"
+    # Create DMG with proper settings to avoid corruption
+    echo "Creating DMG with hdiutil..."
+    echo "Debug: DMG directory contents:"
+    ls -la "$dmg_dir/"
     
-    echo "✅ DMG package created: $DIST_DIR/LAO-$VERSION.dmg"
+    # First, create a temporary DMG
+    local temp_dmg="$DIST_DIR/LAO-$VERSION-temp.dmg"
+    local final_dmg="$DIST_DIR/LAO-$VERSION.dmg"
+    
+    # Calculate size needed (add some padding)
+    local size_mb=$(du -sm "$dmg_dir" | cut -f1)
+    local size_mb=$((size_mb + 20))  # Add 20MB padding for safety
+    echo "Debug: Calculated DMG size: ${size_mb}MB"
+    
+    # Create temporary DMG
+    echo "Creating temporary DMG..."
+    if ! hdiutil create -size "${size_mb}m" -fs HFS+ -volname "LAO $VERSION" "$temp_dmg"; then
+        echo "❌ Failed to create temporary DMG"
+        return 1
+    fi
+    
+    # Mount the DMG
+    echo "Mounting DMG..."
+    local mount_output=$(hdiutil attach "$temp_dmg")
+    local mount_point=$(echo "$mount_output" | grep -E '^/dev/' | sed 's/.*[[:space:]]//')
+    echo "Debug: Mount output: $mount_output"
+    echo "Debug: Mounted DMG at: $mount_point"
+    
+    if [ -z "$mount_point" ]; then
+        echo "❌ Failed to mount DMG"
+        return 1
+    fi
+    
+    # Copy contents to mounted DMG
+    echo "Copying contents to DMG..."
+    if ! cp -R "$dmg_dir"/* "$mount_point/"; then
+        echo "❌ Failed to copy contents to DMG"
+        hdiutil detach "$mount_point" 2>/dev/null || true
+        return 1
+    fi
+    
+    # Unmount the DMG
+    echo "Unmounting DMG..."
+    if ! hdiutil detach "$mount_point"; then
+        echo "❌ Failed to unmount DMG"
+        return 1
+    fi
+    
+    # Convert to compressed format
+    echo "Converting to compressed format..."
+    if ! hdiutil convert "$temp_dmg" -format UDZO -o "$final_dmg"; then
+        echo "❌ Failed to convert DMG to compressed format"
+        rm -f "$temp_dmg"
+        return 1
+    fi
+    
+    # Clean up temporary file
+    rm -f "$temp_dmg"
+    
+    # Verify the DMG
+    echo "Verifying DMG..."
+    if hdiutil verify "$final_dmg"; then
+        echo "✅ DMG package created and verified: $final_dmg"
+        echo "Debug: DMG file size: $(ls -lh "$final_dmg" | awk '{print $5}')"
+    else
+        echo "❌ DMG verification failed"
+        return 1
+    fi
 }
 
 # Function to create macOS tar archive
