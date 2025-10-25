@@ -1,6 +1,6 @@
 [package]
 name = "echo_plugin"
-version = "0.1.10"
+version = "0.1.11"
 edition = "2021"
 description = "Echoes the input as output"
 authors = ["Jake Abendroth <contact@jakea.net>"]
