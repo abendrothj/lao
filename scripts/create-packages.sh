@@ -310,18 +310,19 @@ EOF
     
     # Build RPM
     echo "🔨 Building RPM package..."
-    # Disable job control to prevent fg/bg issues in CI environments
-    set +m
-    if rpmbuild --define "_topdir $rpm_dir" -ba "$spec_dir/lao.spec" 2>&1; then
-        # Copy built RPM
-        cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
-        echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
-    else
-        echo "❌ RPM build failed - this may be due to missing dependencies"
-        echo "💡 Try installing: sudo apt-get install rpm-build"
-        return 1
-    fi
-    set -m
+    # Run rpmbuild in a subshell with job control disabled
+    (
+        set +m
+        if rpmbuild --define "_topdir $rpm_dir" -ba "$spec_dir/lao.spec" 2>&1; then
+            # Copy built RPM
+            cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
+            echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
+        else
+            echo "❌ RPM build failed - this may be due to missing dependencies"
+            echo "💡 Try installing: sudo apt-get install rpm-build"
+            return 1
+        fi
+    )
 }
 
 # Function to create tar archive
@@ -610,10 +611,18 @@ EOF
     
     # Create archive
     cd "$archive_dir"
-    zip -r "$DIST_DIR/lao-$VERSION-windows-x86_64.zip" "lao-$VERSION-windows"
-    cd "$ROOT_DIR"
     
-    echo "✅ Windows ZIP archive created: $DIST_DIR/lao-$VERSION-windows-x86_64.zip"
+    # Check if zip command is available
+    if command -v zip >/dev/null 2>&1; then
+        zip -r "$DIST_DIR/lao-$VERSION-windows-x86_64.zip" "lao-$VERSION-windows"
+        echo "✅ Windows ZIP archive created: $DIST_DIR/lao-$VERSION-windows-x86_64.zip"
+    else
+        echo "⚠️  zip command not found, creating tar.gz instead"
+        tar -czf "$DIST_DIR/lao-$VERSION-windows-x86_64.tar.gz" "lao-$VERSION-windows"
+        echo "✅ Windows tar.gz archive created: $DIST_DIR/lao-$VERSION-windows-x86_64.tar.gz"
+    fi
+    
+    cd "$ROOT_DIR"
 }
 
 # Main packaging function
