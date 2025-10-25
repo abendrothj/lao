@@ -338,24 +338,60 @@ EOF
     
     # Try a different approach: Use rpmbuild with specific options to avoid job control
     echo "Debug: Running rpmbuild with specific options..."
+    echo "Debug: RPM directories:"
+    echo "  spec_dir: $spec_dir"
+    echo "  rpm_dir: $rpm_dir"
+    echo "  rpmbuild_dir: $rpmbuild_dir"
+    echo "  sources_dir: $sources_dir"
+    
+    # List contents of key directories for debugging
+    echo "Debug: Contents of sources directory:"
+    ls -la "$sources_dir/" || echo "Sources directory not found"
+    
+    echo "Debug: Contents of spec directory:"
+    ls -la "$spec_dir/" || echo "Spec directory not found"
     
     # Try building with --quiet and --nodeps to minimize interaction
-    if rpmbuild --define "_topdir $rpm_dir" -bb "$spec_dir/lao.spec" --quiet --nodeps 2>&1; then
-        # Copy built RPM
-        cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
-        echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
-    else
-        echo "❌ RPM build failed - trying without quiet mode..."
-        # Try without --quiet flag
-        if rpmbuild --define "_topdir $rpm_dir" -bb "$spec_dir/lao.spec" --nodeps 2>&1; then
-            cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
+    echo "Attempting RPM build with --quiet --nodeps..."
+    if rpmbuild --define "_topdir $rpm_dir" -bb "$spec_dir/lao.spec" --quiet --nodeps; then
+        echo "RPM build succeeded with --quiet --nodeps"
+        echo "Debug: Contents of RPM build directory after build:"
+        ls -la "$rpmbuild_dir/" || echo "RPM build directory not found"
+        ls -la "$rpmbuild_dir/x86_64/" || echo "x86_64 directory not found"
+        # Check if RPM file was actually created
+        if ls "$rpmbuild_dir/x86_64/lao-$VERSION-1."*.rpm 1> /dev/null 2>&1; then
+            cp "$rpmbuild_dir/x86_64/lao-$VERSION-1."*.rpm "$DIST_DIR/"
             echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
         else
-            echo "❌ RPM build failed - trying with minimal options..."
-            # Try with minimal options
-            if rpmbuild --define "_topdir $rpm_dir" -bb "$spec_dir/lao.spec" 2>&1; then
-                cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
+            echo "❌ RPM build succeeded but no package file found"
+            return 1
+        fi
+    else
+        echo "❌ RPM build failed with --quiet --nodeps, trying without quiet mode..."
+        # Try without --quiet flag
+        if rpmbuild --define "_topdir $rpm_dir" -bb "$spec_dir/lao.spec" --nodeps; then
+            echo "RPM build succeeded with --nodeps"
+            # Check if RPM file was actually created
+            if ls "$rpmbuild_dir/x86_64/lao-$VERSION-1."*.rpm 1> /dev/null 2>&1; then
+                cp "$rpmbuild_dir/x86_64/lao-$VERSION-1."*.rpm "$DIST_DIR/"
                 echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
+            else
+                echo "❌ RPM build succeeded but no package file found"
+                return 1
+            fi
+        else
+            echo "❌ RPM build failed with --nodeps, trying with minimal options..."
+            # Try with minimal options
+            if rpmbuild --define "_topdir $rpm_dir" -bb "$spec_dir/lao.spec"; then
+                echo "RPM build succeeded with minimal options"
+                # Check if RPM file was actually created
+                if ls "$rpmbuild_dir/x86_64/lao-$VERSION-1."*.rpm 1> /dev/null 2>&1; then
+                    cp "$rpmbuild_dir/x86_64/lao-$VERSION-1."*.rpm "$DIST_DIR/"
+                    echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
+                else
+                    echo "❌ RPM build succeeded but no package file found"
+                    return 1
+                fi
             else
                 echo "❌ RPM build failed - this may be due to missing dependencies"
                 echo "💡 Try installing: sudo apt-get install rpm-build"
