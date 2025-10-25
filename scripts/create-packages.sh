@@ -273,7 +273,7 @@ mkdir -p %{buildroot}/usr/bin
 mkdir -p %{buildroot}/usr/lib/lao/plugins
 mkdir -p %{buildroot}/usr/share/applications
 
-# Install pre-built binaries
+# Install pre-built binaries from the tarball
 install -m 755 target/release/lao-cli %{buildroot}/usr/bin/
 install -m 755 target/release/lao-ui %{buildroot}/usr/bin/
 install -m 644 plugins/*.so %{buildroot}/usr/lib/lao/plugins/ 2>/dev/null || true
@@ -313,6 +313,11 @@ EOF
     rm -rf "$temp_dir/lao-$VERSION/target" 2>/dev/null || true
     rm -rf "$temp_dir/lao-$VERSION/.git" 2>/dev/null || true
     rm -rf "$temp_dir/lao-$VERSION/dist" 2>/dev/null || true
+    
+    # Copy pre-built binaries to the tarball for RPM installation
+    mkdir -p "$temp_dir/lao-$VERSION/target/release"
+    cp "$ROOT_DIR/target/release/lao-cli" "$temp_dir/lao-$VERSION/target/release/" 2>/dev/null || true
+    cp "$ROOT_DIR/target/release/lao-ui" "$temp_dir/lao-$VERSION/target/release/" 2>/dev/null || true
     
     # Create tarball from the temp directory
     tar -czf "$sources_dir/lao-$VERSION.tar.gz" \
