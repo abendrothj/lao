@@ -274,7 +274,7 @@ install -m 755 target/release/lao-cli %{buildroot}/usr/bin/
 install -m 755 target/release/lao-ui %{buildroot}/usr/bin/
 install -m 644 plugins/*.so %{buildroot}/usr/lib/lao/plugins/ 2>/dev/null || true
 
-cat > %{buildroot}/usr/share/applications/lao.desktop << 'EOF'
+cat > %{buildroot}/usr/share/applications/lao.desktop << 'DESKTOP_EOF'
 [Desktop Entry]
 Name=LAO Orchestrator
 Comment=$APP_DESCRIPTION
@@ -283,7 +283,7 @@ Icon=lao
 Type=Application
 Categories=Development;Utility;
 StartupNotify=true
-EOF
+DESKTOP_EOF
 
 %files
 /usr/bin/lao-cli
@@ -313,25 +313,31 @@ EOF
     # Build RPM
     echo "🔨 Building RPM package..."
     
-    # Industry standard approach: Ensure completely non-interactive environment
-    # This prevents job control issues by running in a clean environment
-    echo "Debug: Running rpmbuild in clean non-interactive environment..."
+    # Try a different approach: Use rpmbuild with specific options to avoid job control
+    echo "Debug: Running rpmbuild with specific options..."
     
-    # Run rpmbuild with explicit non-interactive flags and clean environment
-    if SHELL=/bin/false rpmbuild --define "_topdir $rpm_dir" -ba "$spec_dir/lao.spec" 2>&1; then
+    # Try building with --quiet and --nodeps to minimize interaction
+    if rpmbuild --define "_topdir $rpm_dir" -bb "$spec_dir/lao.spec" --quiet --nodeps 2>&1; then
         # Copy built RPM
         cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
         echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
     else
-        echo "❌ RPM build failed - trying alternative approach..."
-        # Try building binary-only package with same approach
-        if SHELL=/bin/false rpmbuild --define "_topdir $rpm_dir" -bb "$spec_dir/lao.spec" 2>&1; then
+        echo "❌ RPM build failed - trying without quiet mode..."
+        # Try without --quiet flag
+        if rpmbuild --define "_topdir $rpm_dir" -bb "$spec_dir/lao.spec" --nodeps 2>&1; then
             cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
-            echo "✅ RPM package created (binary only): $DIST_DIR/lao-$VERSION-1.*.rpm"
+            echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
         else
-            echo "❌ RPM build failed - this may be due to missing dependencies"
-            echo "💡 Try installing: sudo apt-get install rpm-build"
-            return 1
+            echo "❌ RPM build failed - trying with minimal options..."
+            # Try with minimal options
+            if rpmbuild --define "_topdir $rpm_dir" -bb "$spec_dir/lao.spec" 2>&1; then
+                cp "$rpmbuild_dir/x86_64/lao-$VERSION-1.*.rpm" "$DIST_DIR/"
+                echo "✅ RPM package created: $DIST_DIR/lao-$VERSION-1.*.rpm"
+            else
+                echo "❌ RPM build failed - this may be due to missing dependencies"
+                echo "💡 Try installing: sudo apt-get install rpm-build"
+                return 1
+            fi
         fi
     fi
 }
