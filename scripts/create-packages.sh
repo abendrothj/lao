@@ -706,9 +706,35 @@ create_msi_package() {
 EOF
     
     echo "✅ WiX configuration created: $msi_dir/lao.wxs"
-    echo "💡 Use WiX Toolset to build MSI:"
-    echo "   candle $msi_dir/lao.wxs"
-    echo "   light lao.wixobj"
+    echo "🔧 Building MSI with WiX Toolset..."
+    # Use PowerShell to ensure WiX is installed and build the MSI. This avoids path/space issues on Windows runners.
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "
+      $ErrorActionPreference = 'Stop';
+      function Has-Command([string]$name) { Get-Command $name -ErrorAction SilentlyContinue | ForEach-Object { $_ } }
+      if (-not (Has-Command 'candle.exe')) {
+        Write-Host 'Installing WiX Toolset via Chocolatey...';
+        if (-not (Has-Command 'choco.exe')) {
+          Write-Host 'Chocolatey not found; installing Chocolatey...';
+          Set-ExecutionPolicy Bypass -Scope Process -Force; 
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; 
+          Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'));
+        }
+        choco install wixtoolset -y --no-progress;
+      }
+      $wixBin = (Get-Command candle.exe | Select-Object -First 1).Source | Split-Path;
+      $env:Path = $wixBin + ';' + $env:Path;
+      $msiDir = (Resolve-Path "$msi_dir").Path;
+      $distDir = (Resolve-Path "$DIST_DIR").Path;
+      $wxs = Join-Path $msiDir 'lao.wxs';
+      $wixobj = Join-Path $msiDir 'lao.wixobj';
+      $msiOut = Join-Path $distDir ('lao-$env:VERSION-x86_64.msi');
+      Write-Host ('Using WiX bin: ' + $wixBin);
+      & candle.exe -nologo -o $wixobj $wxs;
+      if ($LASTEXITCODE -ne 0) { throw 'candle.exe failed' }
+      & light.exe -nologo -o $msiOut $wixobj;
+      if ($LASTEXITCODE -ne 0) { throw 'light.exe failed' }
+    "
+    echo "✅ MSI created: $DIST_DIR/lao-$VERSION-x86_64.msi"
 }
 
 # Function to create Windows ZIP archive
