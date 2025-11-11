@@ -546,15 +546,13 @@ EOF
         return 1
     fi
     
-    # Mount the DMG
+    # Mount the DMG at a fixed, known mount point to avoid parsing issues with spaces
     echo "Mounting DMG..."
-    local mount_output=$(hdiutil attach "$temp_dmg")
-    local mount_point=$(echo "$mount_output" | grep -E '^/dev/' | sed 's/.*[[:space:]]//')
-    echo "Debug: Mount output: $mount_output"
-    echo "Debug: Mounted DMG at: $mount_point"
-    
-    if [ -z "$mount_point" ]; then
+    local mount_point="$DIST_DIR/LAO-$VERSION-mnt"
+    mkdir -p "$mount_point"
+    if ! hdiutil attach "$temp_dmg" -mountpoint "$mount_point" -nobrowse -quiet; then
         echo "❌ Failed to mount DMG"
+        rmdir "$mount_point" 2>/dev/null || true
         return 1
     fi
     
@@ -568,14 +566,18 @@ EOF
     
     # Unmount the DMG
     echo "Unmounting DMG..."
-    if ! hdiutil detach "$mount_point"; then
+    if ! hdiutil detach "$mount_point" -quiet; then
         echo "❌ Failed to unmount DMG"
         return 1
     fi
+    rmdir "$mount_point" 2>/dev/null || true
+    sync
+    sleep 1
     
-    # Convert to compressed format
+    # Convert to compressed format (overwrite if exists)
     echo "Converting to compressed format..."
-    if ! hdiutil convert "$temp_dmg" -format UDZO -o "$final_dmg"; then
+    if [ -f "$final_dmg" ]; then rm -f "$final_dmg"; fi
+    if ! hdiutil convert "$temp_dmg" -format UDZO -o "$final_dmg" -ov; then
         echo "❌ Failed to convert DMG to compressed format"
         rm -f "$temp_dmg"
         return 1
