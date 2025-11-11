@@ -707,34 +707,51 @@ EOF
     
     echo "✅ WiX configuration created: $msi_dir/lao.wxs"
     echo "🔧 Building MSI with WiX Toolset..."
-    # Use PowerShell to ensure WiX is installed and build the MSI. This avoids path/space issues on Windows runners.
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "
-      trap { Write-Error $_; exit 1 }
-      function Has-Command([string]$name) { Get-Command $name -ErrorAction SilentlyContinue | ForEach-Object { $_ } }
-      if (-not (Has-Command 'candle.exe')) {
-        Write-Host 'Installing WiX Toolset via Chocolatey...';
-        if (-not (Has-Command 'choco.exe')) {
-          Write-Host 'Chocolatey not found; installing Chocolatey...';
-          Set-ExecutionPolicy Bypass -Scope Process -Force;
-          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12;
-          Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'));
-        }
-        choco install wixtoolset -y --no-progress;
-      }
-      $wixBin = (Get-Command candle.exe | Select-Object -First 1).Source | Split-Path;
-      $env:Path = $wixBin + ';' + $env:Path;
-      $msiDir = (Resolve-Path "$msi_dir").Path;
-      $distDir = (Resolve-Path "$DIST_DIR").Path;
-      $version = '$VERSION';
-      $wxs = Join-Path $msiDir 'lao.wxs';
-      $wixobj = Join-Path $msiDir 'lao.wixobj';
-      $msiOut = Join-Path $distDir ("lao-$version-x86_64.msi");
-      Write-Host ('Using WiX bin: ' + $wixBin);
-      & candle.exe -nologo -o $wixobj $wxs;
-      if ($LASTEXITCODE -ne 0) { throw 'candle.exe failed' }
-      & light.exe -nologo -o $msiOut $wixobj;
-      if ($LASTEXITCODE -ne 0) { throw 'light.exe failed' }
-    "
+    local ps_script="$msi_dir/build-wix.ps1"
+    cat > "$ps_script" <<'EOF'
+param(
+    [Parameter(Mandatory=$true)][string]$Version,
+    [Parameter(Mandatory=$true)][string]$MsiDir,
+    [Parameter(Mandatory=$true)][string]$DistDir
+)
+
+trap { Write-Error $_; exit 1 }
+
+function Has-Command {
+    param([string]$Name)
+    return (Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+if (-not (Has-Command 'candle.exe')) {
+    Write-Host 'Installing WiX Toolset via Chocolatey...'
+    if (-not (Has-Command 'choco.exe')) {
+        Write-Host 'Chocolatey not found; installing Chocolatey...'
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+    }
+    choco install wixtoolset -y --no-progress
+}
+
+$wixBin = (Get-Command candle.exe | Select-Object -First 1).Source | Split-Path
+$env:Path = $wixBin + ';' + $env:Path
+$msiPath = (Resolve-Path $MsiDir).Path
+$distPath = (Resolve-Path $DistDir).Path
+$wxs = Join-Path $msiPath 'lao.wxs'
+$wixobj = Join-Path $msiPath 'lao.wixobj'
+$msiOut = Join-Path $distPath ("lao-$Version-x86_64.msi")
+
+Write-Host ("Using WiX bin: $wixBin")
+
+& candle.exe -nologo -o $wixobj $wxs
+if ($LASTEXITCODE -ne 0) { throw 'candle.exe failed' }
+
+& light.exe -nologo -o $msiOut $wixobj
+if ($LASTEXITCODE -ne 0) { throw 'light.exe failed' }
+EOF
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File "$ps_script" -Version "$VERSION" -MsiDir "$msi_dir" -DistDir "$DIST_DIR"
+    rm -f "$ps_script"
     echo "✅ MSI created: $DIST_DIR/lao-$VERSION-x86_64.msi"
 }
 
