@@ -10,29 +10,29 @@ unsafe extern "C" fn name() -> *const c_char {
 }
 
 unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
-    if input.is_null() || (*input).text.is_null() {
-        return PluginOutput {
-            text: out("error: MarkdownReportPlugin received null input"),
-        };
-    }
-
-    let raw = CStr::from_ptr((*input).text).to_string_lossy().to_string();
-    let report = build_report(&raw);
-    let markdown = render(&report);
-
-    if let Some(path) = &report.path {
-        if let Err(e) = std::fs::write(path, &markdown) {
+    lao_plugin_api::catch_panic_output(|| {
+        if input.is_null() || (*input).text.is_null() {
             return PluginOutput {
-                text: out(&format!("error: failed to write '{}': {}", path, e)),
+                text: out("error: MarkdownReportPlugin received null input"),
             };
         }
-    }
 
-    PluginOutput {
-        text: CString::new(markdown)
-            .unwrap_or_else(|_| CString::new("error: report contains invalid bytes").unwrap())
-            .into_raw(),
-    }
+        let raw = CStr::from_ptr((*input).text).to_string_lossy().to_string();
+        let report = build_report(&raw);
+        let markdown = render(&report);
+
+        if let Some(path) = &report.path {
+            if let Err(e) = std::fs::write(path, &markdown) {
+                return PluginOutput {
+                    text: out(&format!("error: failed to write '{}': {}", path, e)),
+                };
+            }
+        }
+
+        PluginOutput {
+            text: lao_plugin_api::owned_cstring(&markdown),
+        }
+    })
 }
 
 struct Report {
@@ -71,8 +71,8 @@ fn render(report: &Report) -> String {
     format!("# {}\n\n{}\n", report.title.trim(), report.body.trim())
 }
 
-unsafe fn out(msg: &str) -> *mut c_char {
-    CString::new(msg).unwrap().into_raw()
+fn out(msg: &str) -> *mut c_char {
+    lao_plugin_api::owned_cstring(msg)
 }
 
 unsafe extern "C" fn free_output(output: PluginOutput) {
@@ -111,13 +111,15 @@ unsafe extern "C" fn get_metadata() -> PluginMetadata {
 }
 
 unsafe extern "C" fn validate_input(input: *const PluginInput) -> bool {
-    if input.is_null() || (*input).text.is_null() {
-        return false;
-    }
-    !CStr::from_ptr((*input).text)
-        .to_string_lossy()
-        .trim()
-        .is_empty()
+    lao_plugin_api::catch_panic_bool(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return false;
+        }
+        !CStr::from_ptr((*input).text)
+            .to_string_lossy()
+            .trim()
+            .is_empty()
+    })
 }
 
 unsafe extern "C" fn get_capabilities() -> *const c_char {

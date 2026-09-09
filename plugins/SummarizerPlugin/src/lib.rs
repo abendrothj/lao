@@ -7,7 +7,11 @@ unsafe extern "C" fn name() -> *const c_char {
 }
 
 unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
-    if input.is_null() {
+    lao_plugin_api::catch_panic_output(|| run_inner(input))
+}
+
+unsafe fn run_inner(input: *const PluginInput) -> PluginOutput {
+    if input.is_null() || (*input).text.is_null() {
         return PluginOutput {
             text: std::ptr::null_mut(),
         };
@@ -16,7 +20,7 @@ unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
     let text = c_str.to_string_lossy();
     let client = reqwest::blocking::Client::new();
     let res = client
-        .post("http://localhost:11434/api/generate")
+        .post("http://127.0.0.1:11434/api/generate")
         .json(&serde_json::json!({
             "model": "mistral",
             "prompt": format!("Summarize this:\n\n{}", text),
@@ -44,24 +48,20 @@ unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
                     ),
                 }
             } else {
-                format!("error: SummarizerPlugin received HTTP error {} from Ollama. Make sure Ollama is running on localhost:11434.", resp.status())
+                format!("error: SummarizerPlugin received HTTP error {} from Ollama. Make sure Ollama is running on 127.0.0.1:11434.", resp.status())
             }
         }
         Err(e) => {
             if e.is_connect() {
-                "error: SummarizerPlugin cannot connect to Ollama at http://localhost:11434. Make sure Ollama is running: 'ollama serve' or 'brew services start ollama'".to_string()
+                "error: SummarizerPlugin cannot connect to Ollama at http://127.0.0.1:11434. Make sure Ollama is running: 'ollama serve' or 'brew services start ollama'".to_string()
             } else {
                 format!("error: SummarizerPlugin request failed: {}", e)
             }
         }
     };
-    let out = CString::new(summary)
-        .unwrap_or_else(|_| {
-            // Fallback if summary contains null bytes
-            CString::new("error: SummarizerPlugin output contains invalid characters").unwrap()
-        })
-        .into_raw();
-    PluginOutput { text: out }
+    PluginOutput {
+        text: lao_plugin_api::owned_cstring(&summary),
+    }
 }
 
 unsafe extern "C" fn free_output(output: PluginOutput) {
@@ -101,12 +101,14 @@ unsafe extern "C" fn get_metadata() -> PluginMetadata {
 }
 
 unsafe extern "C" fn validate_input(input: *const PluginInput) -> bool {
-    if input.is_null() {
-        return false;
-    }
-    let c_str = CStr::from_ptr((*input).text);
-    let text = c_str.to_string_lossy();
-    !text.trim().is_empty()
+    lao_plugin_api::catch_panic_bool(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return false;
+        }
+        let c_str = CStr::from_ptr((*input).text);
+        let text = c_str.to_string_lossy();
+        !text.trim().is_empty()
+    })
 }
 
 unsafe extern "C" fn get_capabilities() -> *const c_char {

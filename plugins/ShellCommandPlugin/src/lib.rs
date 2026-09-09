@@ -10,34 +10,34 @@ unsafe extern "C" fn name() -> *const c_char {
 }
 
 unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
-    if input.is_null() || (*input).text.is_null() {
-        return PluginOutput {
-            text: out("error: ShellCommandPlugin received null input"),
-        };
-    }
+    lao_plugin_api::catch_panic_output(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return PluginOutput {
+                text: out("error: ShellCommandPlugin received null input"),
+            };
+        }
 
-    if std::env::var("LAO_ALLOW_SHELL").unwrap_or_default() != "1" {
-        return PluginOutput {
-            text: out("error: shell execution disabled; set LAO_ALLOW_SHELL=1 to enable"),
-        };
-    }
+        if std::env::var("LAO_ALLOW_SHELL").unwrap_or_default() != "1" {
+            return PluginOutput {
+                text: out("error: shell execution disabled; set LAO_ALLOW_SHELL=1 to enable"),
+            };
+        }
 
-    let command = CStr::from_ptr((*input).text).to_string_lossy();
-    let command = command.trim();
-    if command.is_empty() {
-        return PluginOutput {
-            text: out("error: ShellCommandPlugin received an empty command"),
-        };
-    }
+        let command = CStr::from_ptr((*input).text).to_string_lossy();
+        let command = command.trim();
+        if command.is_empty() {
+            return PluginOutput {
+                text: out("error: ShellCommandPlugin received an empty command"),
+            };
+        }
 
-    PluginOutput {
-        text: match run_command(command) {
-            Ok(stdout) => CString::new(stdout)
-                .unwrap_or_else(|_| CString::new("error: output contains invalid bytes").unwrap())
-                .into_raw(),
-            Err(e) => out(&format!("error: {}", e)),
-        },
-    }
+        PluginOutput {
+            text: match run_command(command) {
+                Ok(stdout) => lao_plugin_api::owned_cstring(&stdout),
+                Err(e) => out(&format!("error: {}", e)),
+            },
+        }
+    })
 }
 
 fn run_command(command: &str) -> Result<String, String> {
@@ -59,8 +59,8 @@ fn run_command(command: &str) -> Result<String, String> {
     }
 }
 
-unsafe fn out(msg: &str) -> *mut c_char {
-    CString::new(msg).unwrap().into_raw()
+fn out(msg: &str) -> *mut c_char {
+    lao_plugin_api::owned_cstring(msg)
 }
 
 unsafe extern "C" fn free_output(output: PluginOutput) {
@@ -98,13 +98,15 @@ unsafe extern "C" fn get_metadata() -> PluginMetadata {
 }
 
 unsafe extern "C" fn validate_input(input: *const PluginInput) -> bool {
-    if input.is_null() || (*input).text.is_null() {
-        return false;
-    }
-    !CStr::from_ptr((*input).text)
-        .to_string_lossy()
-        .trim()
-        .is_empty()
+    lao_plugin_api::catch_panic_bool(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return false;
+        }
+        !CStr::from_ptr((*input).text)
+            .to_string_lossy()
+            .trim()
+            .is_empty()
+    })
 }
 
 unsafe extern "C" fn get_capabilities() -> *const c_char {

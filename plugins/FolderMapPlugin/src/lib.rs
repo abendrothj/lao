@@ -12,41 +12,41 @@ unsafe extern "C" fn name() -> *const c_char {
 }
 
 unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
-    if input.is_null() || (*input).text.is_null() {
-        return PluginOutput {
-            text: out("error: FolderMapPlugin received null input"),
-        };
-    }
-
-    let root = CStr::from_ptr((*input).text).to_string_lossy();
-    let root = root.trim();
-    if root.is_empty() {
-        return PluginOutput {
-            text: out("error: FolderMapPlugin received an empty path"),
-        };
-    }
-
-    let root_path = Path::new(root);
-    if !root_path.is_dir() {
-        return PluginOutput {
-            text: out(&format!("error: '{}' is not a directory", root)),
-        };
-    }
-
-    match collect_files(root_path) {
-        Ok(mut files) => {
-            files.sort();
-            let listing = files.join("\n");
-            PluginOutput {
-                text: CString::new(listing)
-                    .unwrap_or_else(|_| CString::new("error: invalid path bytes").unwrap())
-                    .into_raw(),
-            }
+    lao_plugin_api::catch_panic_output(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return PluginOutput {
+                text: out("error: FolderMapPlugin received null input"),
+            };
         }
-        Err(e) => PluginOutput {
-            text: out(&format!("error: failed to map '{}': {}", root, e)),
-        },
-    }
+
+        let root = CStr::from_ptr((*input).text).to_string_lossy();
+        let root = root.trim();
+        if root.is_empty() {
+            return PluginOutput {
+                text: out("error: FolderMapPlugin received an empty path"),
+            };
+        }
+
+        let root_path = Path::new(root);
+        if !root_path.is_dir() {
+            return PluginOutput {
+                text: out(&format!("error: '{}' is not a directory", root)),
+            };
+        }
+
+        match collect_files(root_path) {
+            Ok(mut files) => {
+                files.sort();
+                let listing = files.join("\n");
+                PluginOutput {
+                    text: lao_plugin_api::owned_cstring(&listing),
+                }
+            }
+            Err(e) => PluginOutput {
+                text: out(&format!("error: failed to map '{}': {}", root, e)),
+            },
+        }
+    })
 }
 
 fn collect_files(root: &Path) -> std::io::Result<Vec<String>> {
@@ -71,8 +71,8 @@ fn collect_files(root: &Path) -> std::io::Result<Vec<String>> {
     Ok(files)
 }
 
-unsafe fn out(msg: &str) -> *mut c_char {
-    CString::new(msg).unwrap().into_raw()
+fn out(msg: &str) -> *mut c_char {
+    lao_plugin_api::owned_cstring(msg)
 }
 
 unsafe extern "C" fn free_output(output: PluginOutput) {
@@ -110,13 +110,15 @@ unsafe extern "C" fn get_metadata() -> PluginMetadata {
 }
 
 unsafe extern "C" fn validate_input(input: *const PluginInput) -> bool {
-    if input.is_null() || (*input).text.is_null() {
-        return false;
-    }
-    !CStr::from_ptr((*input).text)
-        .to_string_lossy()
-        .trim()
-        .is_empty()
+    lao_plugin_api::catch_panic_bool(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return false;
+        }
+        !CStr::from_ptr((*input).text)
+            .to_string_lossy()
+            .trim()
+            .is_empty()
+    })
 }
 
 unsafe extern "C" fn get_capabilities() -> *const c_char {

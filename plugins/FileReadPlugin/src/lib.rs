@@ -9,33 +9,32 @@ unsafe extern "C" fn name() -> *const c_char {
 }
 
 unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
-    if input.is_null() || (*input).text.is_null() {
-        return PluginOutput {
-            text: error_output("error: FileReadPlugin received null input"),
+    lao_plugin_api::catch_panic_output(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return PluginOutput {
+                text: error_output("error: FileReadPlugin received null input"),
+            };
+        }
+
+        let path = CStr::from_ptr((*input).text).to_string_lossy();
+        let path = path.trim();
+        if path.is_empty() {
+            return PluginOutput {
+                text: error_output("error: FileReadPlugin received an empty path"),
+            };
+        }
+
+        let text = match std::fs::read_to_string(path) {
+            Ok(contents) => lao_plugin_api::owned_cstring(&contents),
+            Err(e) => error_output(&format!("error: failed to read '{}': {}", path, e)),
         };
-    }
 
-    let path = CStr::from_ptr((*input).text).to_string_lossy();
-    let path = path.trim();
-    if path.is_empty() {
-        return PluginOutput {
-            text: error_output("error: FileReadPlugin received an empty path"),
-        };
-    }
-
-    let text = match std::fs::read_to_string(path) {
-        Ok(contents) => CString::new(contents)
-            .unwrap_or_else(|_| CString::new("error: file contains invalid bytes").unwrap()),
-        Err(e) => CString::new(format!("error: failed to read '{}': {}", path, e)).unwrap(),
-    };
-
-    PluginOutput {
-        text: text.into_raw(),
-    }
+        PluginOutput { text }
+    })
 }
 
-unsafe fn error_output(msg: &str) -> *mut c_char {
-    CString::new(msg).unwrap().into_raw()
+fn error_output(msg: &str) -> *mut c_char {
+    lao_plugin_api::owned_cstring(msg)
 }
 
 unsafe extern "C" fn free_output(output: PluginOutput) {
@@ -73,13 +72,15 @@ unsafe extern "C" fn get_metadata() -> PluginMetadata {
 }
 
 unsafe extern "C" fn validate_input(input: *const PluginInput) -> bool {
-    if input.is_null() || (*input).text.is_null() {
-        return false;
-    }
-    !CStr::from_ptr((*input).text)
-        .to_string_lossy()
-        .trim()
-        .is_empty()
+    lao_plugin_api::catch_panic_bool(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return false;
+        }
+        !CStr::from_ptr((*input).text)
+            .to_string_lossy()
+            .trim()
+            .is_empty()
+    })
 }
 
 unsafe extern "C" fn get_capabilities() -> *const c_char {

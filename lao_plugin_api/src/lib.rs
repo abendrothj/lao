@@ -1,4 +1,4 @@
-use std::ffi::{c_char, CStr};
+use std::ffi::{c_char, CStr, CString};
 
 /// Current ABI version produced by this crate. Plugins built against this crate
 /// advertise this version in their vtable.
@@ -58,6 +58,49 @@ impl PluginResult {
     }
 }
 
+/// Message carried by the fallback outputs the `catch_panic_*` helpers produce
+/// when a plugin body panics.
+pub const LAO_PANIC_ERROR: &str = "error: plugin panicked";
+
+/// Allocate an owned C string for `msg`, stripping interior NUL bytes so the
+/// conversion cannot fail. The returned pointer follows the usual plugin output
+/// ownership: the host releases it via `free_output`/`free_result`.
+pub fn owned_cstring(msg: &str) -> *mut c_char {
+    let sanitized: Vec<u8> = msg.bytes().filter(|&b| b != 0).collect();
+    CString::new(sanitized)
+        .expect("NUL bytes stripped")
+        .into_raw()
+}
+
+/// Run a plugin `run` body, containing panics at the FFI boundary. A panic
+/// unwinding out of an `extern "C"` fn aborts the host process, so every
+/// plugin entry point should route its body through one of these helpers.
+/// Panics are mapped to an owned [`LAO_PANIC_ERROR`] output.
+pub fn catch_panic_output<F: FnOnce() -> PluginOutput>(body: F) -> PluginOutput {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)).unwrap_or_else(|_| PluginOutput {
+        text: owned_cstring(LAO_PANIC_ERROR),
+    })
+}
+
+/// Run a plugin `run_structured` body, mapping panics to
+/// [`LAO_STATUS_RUNTIME_ERROR`] with an owned [`LAO_PANIC_ERROR`] message.
+pub fn catch_panic_result<F: FnOnce() -> PluginResult>(body: F) -> PluginResult {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)).unwrap_or_else(|_| PluginResult {
+        status: LAO_STATUS_RUNTIME_ERROR,
+        text: owned_cstring(LAO_PANIC_ERROR),
+    })
+}
+
+/// Run a plugin `run_with_buffer` body, mapping panics to `0` (no bytes written).
+pub fn catch_panic_buffer_len<F: FnOnce() -> usize>(body: F) -> usize {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)).unwrap_or(0)
+}
+
+/// Run a plugin `validate_input` body, mapping panics to `false`.
+pub fn catch_panic_bool<F: FnOnce() -> bool>(body: F) -> bool {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)).unwrap_or(false)
+}
+
 /// Generate ABI v2 structured adapters (`__lao_run_structured` / `__lao_free_result`)
 /// that bridge a plugin's existing v1 `run` function to the structured channel.
 ///
@@ -71,8 +114,10 @@ macro_rules! lao_structured_adapter {
         unsafe extern "C" fn __lao_run_structured(
             input: *const $crate::PluginInput,
         ) -> $crate::PluginResult {
-            let out = $run(input);
-            $crate::PluginResult::from_text_output(out)
+            $crate::catch_panic_result(|| {
+                let out = $run(input);
+                $crate::PluginResult::from_text_output(out)
+            })
         }
 
         unsafe extern "C" fn __lao_free_result(result: $crate::PluginResult) {

@@ -69,7 +69,11 @@ fn find_whisper_binary() -> Option<String> {
 }
 
 unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
-    if input.is_null() {
+    lao_plugin_api::catch_panic_output(|| run_inner(input))
+}
+
+unsafe fn run_inner(input: *const PluginInput) -> PluginOutput {
+    if input.is_null() || (*input).text.is_null() {
         return PluginOutput {
             text: std::ptr::null_mut(),
         };
@@ -86,7 +90,7 @@ unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
                 Install from: https://github.com/ggerganov/whisper.cpp"
                 .to_string();
             return PluginOutput {
-                text: CString::new(error_msg).unwrap().into_raw(),
+                text: lao_plugin_api::owned_cstring(&error_msg),
             };
         }
     };
@@ -94,29 +98,23 @@ unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
     let output = Command::new(&whisper_bin).arg(&*audio_path).output();
     let text = match output {
         Ok(out) if out.status.success() => {
-            CString::new(String::from_utf8_lossy(&out.stdout).to_string())
-                .unwrap()
-                .into_raw()
+            lao_plugin_api::owned_cstring(&String::from_utf8_lossy(&out.stdout))
         }
-        Ok(out) => CString::new(format!(
+        Ok(out) => lao_plugin_api::owned_cstring(&format!(
             "whisper.cpp failed: {}\nCommand: {} {}\nStderr: {}",
             out.status,
             whisper_bin,
             audio_path,
             String::from_utf8_lossy(&out.stderr)
-        ))
-        .unwrap()
-        .into_raw(),
-        Err(e) => CString::new(format!(
+        )),
+        Err(e) => lao_plugin_api::owned_cstring(&format!(
             "Failed to run whisper.cpp: {}\nBinary path: {}\nAudio file: {}\n\n\
             Troubleshooting:\n\
             1. Ensure whisper.cpp is installed and in your PATH\n\
             2. Or set WHISPER_CPP_PATH environment variable to the full path\n\
             3. Verify the audio file exists: {}",
             e, whisper_bin, audio_path, audio_path
-        ))
-        .unwrap()
-        .into_raw(),
+        )),
     };
     PluginOutput { text }
 }
@@ -158,12 +156,14 @@ unsafe extern "C" fn get_metadata() -> PluginMetadata {
 }
 
 unsafe extern "C" fn validate_input(input: *const PluginInput) -> bool {
-    if input.is_null() {
-        return false;
-    }
-    let c_str = CStr::from_ptr((*input).text);
-    let text = c_str.to_string_lossy();
-    !text.trim().is_empty()
+    lao_plugin_api::catch_panic_bool(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return false;
+        }
+        let c_str = CStr::from_ptr((*input).text);
+        let text = c_str.to_string_lossy();
+        !text.trim().is_empty()
+    })
 }
 
 unsafe extern "C" fn get_capabilities() -> *const c_char {

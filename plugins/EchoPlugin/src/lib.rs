@@ -10,31 +10,31 @@ unsafe extern "C" fn name() -> *const c_char {
 }
 
 unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
-    if input.is_null() || (*input).text.is_null() {
-        println!("[EchoPlugin] Received null input");
-        return PluginOutput {
-            text: std::ptr::null_mut(),
-        };
-    }
-    let c_str = CStr::from_ptr((*input).text);
-    let s = c_str.to_string_lossy();
-    println!("[EchoPlugin] Received input: {}", s);
+    lao_plugin_api::catch_panic_output(|| {
+        if input.is_null() || (*input).text.is_null() {
+            println!("[EchoPlugin] Received null input");
+            return PluginOutput {
+                text: std::ptr::null_mut(),
+            };
+        }
+        let c_str = CStr::from_ptr((*input).text);
+        let s = c_str.to_string_lossy();
+        println!("[EchoPlugin] Received input: {}", s);
 
-    // Validate input - should be a simple string, not YAML object or empty
-    if s.trim().is_empty() || s.contains("not:") || s.contains("{") || s.contains("}") {
-        let error_msg = "error: invalid input for Echo plugin";
-        let out = CString::new(error_msg).unwrap();
-        println!("[EchoPlugin] Returning error: {}", error_msg);
-        return PluginOutput {
-            text: out.into_raw(),
-        };
-    }
+        // Validate input - should be a simple string, not YAML object or empty
+        if s.trim().is_empty() || s.contains("not:") || s.contains("{") || s.contains("}") {
+            let error_msg = "error: invalid input for Echo plugin";
+            println!("[EchoPlugin] Returning error: {}", error_msg);
+            return PluginOutput {
+                text: lao_plugin_api::owned_cstring(error_msg),
+            };
+        }
 
-    let out = CString::new(s.as_ref()).unwrap();
-    println!("[EchoPlugin] Returning output: {}", out.to_string_lossy());
-    PluginOutput {
-        text: out.into_raw(),
-    }
+        println!("[EchoPlugin] Returning output: {}", s);
+        PluginOutput {
+            text: lao_plugin_api::owned_cstring(s.as_ref()),
+        }
+    })
 }
 
 unsafe extern "C" fn free_output(output: PluginOutput) {
@@ -48,18 +48,20 @@ unsafe extern "C" fn run_with_buffer(
     buffer: *mut c_char,
     buffer_len: usize,
 ) -> usize {
-    if input.is_null() || (*input).text.is_null() || buffer.is_null() || buffer_len == 0 {
-        return 0;
-    }
-    let c_str = std::ffi::CStr::from_ptr((*input).text);
-    let bytes = c_str.to_bytes();
-    if bytes.is_empty() {
-        return 0;
-    }
-    let max_copy = std::cmp::min(bytes.len(), buffer_len - 1);
-    std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer as *mut u8, max_copy);
-    *buffer.add(max_copy) = 0; // null terminator
-    max_copy
+    lao_plugin_api::catch_panic_buffer_len(|| {
+        if input.is_null() || (*input).text.is_null() || buffer.is_null() || buffer_len == 0 {
+            return 0;
+        }
+        let c_str = std::ffi::CStr::from_ptr((*input).text);
+        let bytes = c_str.to_bytes();
+        if bytes.is_empty() {
+            return 0;
+        }
+        let max_copy = std::cmp::min(bytes.len(), buffer_len - 1);
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer as *mut u8, max_copy);
+        *buffer.add(max_copy) = 0; // null terminator
+        max_copy
+    })
 }
 
 unsafe extern "C" fn get_metadata() -> PluginMetadata {
@@ -85,12 +87,17 @@ unsafe extern "C" fn get_metadata() -> PluginMetadata {
 }
 
 unsafe extern "C" fn validate_input(input: *const PluginInput) -> bool {
-    if input.is_null() || (*input).text.is_null() {
-        return false;
-    }
-    let c_str = CStr::from_ptr((*input).text);
-    let text = c_str.to_string_lossy();
-    !text.trim().is_empty() && !text.contains("not:") && !text.contains("{") && !text.contains("}")
+    lao_plugin_api::catch_panic_bool(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return false;
+        }
+        let c_str = CStr::from_ptr((*input).text);
+        let text = c_str.to_string_lossy();
+        !text.trim().is_empty()
+            && !text.contains("not:")
+            && !text.contains("{")
+            && !text.contains("}")
+    })
 }
 
 unsafe extern "C" fn get_capabilities() -> *const c_char {
@@ -101,26 +108,25 @@ unsafe extern "C" fn get_capabilities() -> *const c_char {
 /// Native ABI v2 entry point: returns real status codes instead of the `error:`
 /// text convention.
 unsafe extern "C" fn run_structured(input: *const PluginInput) -> PluginResult {
-    if input.is_null() || (*input).text.is_null() {
-        let msg = CString::new("null input").expect("static message");
-        return PluginResult {
-            status: LAO_STATUS_VALIDATION_FAILED,
-            text: msg.into_raw(),
-        };
-    }
-    let s = CStr::from_ptr((*input).text).to_string_lossy();
-    if s.trim().is_empty() || s.contains("not:") || s.contains("{") || s.contains("}") {
-        let msg = CString::new("invalid input for Echo plugin").expect("static message");
-        return PluginResult {
-            status: LAO_STATUS_VALIDATION_FAILED,
-            text: msg.into_raw(),
-        };
-    }
-    let out = CString::new(s.as_ref()).unwrap_or_else(|_| CString::new("").expect("empty"));
-    PluginResult {
-        status: LAO_STATUS_SUCCESS,
-        text: out.into_raw(),
-    }
+    lao_plugin_api::catch_panic_result(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return PluginResult {
+                status: LAO_STATUS_VALIDATION_FAILED,
+                text: lao_plugin_api::owned_cstring("null input"),
+            };
+        }
+        let s = CStr::from_ptr((*input).text).to_string_lossy();
+        if s.trim().is_empty() || s.contains("not:") || s.contains("{") || s.contains("}") {
+            return PluginResult {
+                status: LAO_STATUS_VALIDATION_FAILED,
+                text: lao_plugin_api::owned_cstring("invalid input for Echo plugin"),
+            };
+        }
+        PluginResult {
+            status: LAO_STATUS_SUCCESS,
+            text: lao_plugin_api::owned_cstring(s.as_ref()),
+        }
+    })
 }
 
 unsafe extern "C" fn free_result(result: PluginResult) {

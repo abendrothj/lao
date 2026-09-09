@@ -46,7 +46,11 @@ fn find_matching_workflow(input: &str, library: &[(String, String)]) -> Option<S
 }
 
 unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
-    if input.is_null() {
+    lao_plugin_api::catch_panic_output(|| run_inner(input))
+}
+
+unsafe fn run_inner(input: *const PluginInput) -> PluginOutput {
+    if input.is_null() || (*input).text.is_null() {
         return PluginOutput {
             text: std::ptr::null_mut(),
         };
@@ -58,18 +62,16 @@ unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
     // Check for nonsense input first
     if input_str.contains("nonsense") || input_str.len() < 5 {
         let error_msg = "error: could not generate workflow for invalid input";
-        let cstr = CString::new(error_msg).unwrap();
         return PluginOutput {
-            text: cstr.into_raw(),
+            text: lao_plugin_api::owned_cstring(error_msg),
         };
     }
 
     // Try to match against prompt library first
     if let Some(library) = load_prompt_library() {
         if let Some(workflow) = find_matching_workflow(&input_str, &library) {
-            let cstr = CString::new(workflow).unwrap();
             return PluginOutput {
-                text: cstr.into_raw(),
+                text: lao_plugin_api::owned_cstring(&workflow),
             };
         }
     }
@@ -114,9 +116,8 @@ unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
                     .to_string();
 
                 if cleaned.contains("workflow:") && cleaned.contains("steps:") {
-                    let cstr = CString::new(cleaned).unwrap();
                     return PluginOutput {
-                        text: cstr.into_raw(),
+                        text: lao_plugin_api::owned_cstring(&cleaned),
                     };
                 }
             } else {
@@ -133,9 +134,8 @@ unsafe extern "C" fn run(input: *const PluginInput) -> PluginOutput {
 
     // Final fallback - return error for unmatched prompts
     let error_msg = "error: could not generate workflow for this input";
-    let cstr = CString::new(error_msg).unwrap();
     PluginOutput {
-        text: cstr.into_raw(),
+        text: lao_plugin_api::owned_cstring(error_msg),
     }
 }
 
@@ -150,39 +150,41 @@ unsafe extern "C" fn run_with_buffer(
     buffer: *mut c_char,
     buffer_len: usize,
 ) -> usize {
-    if input.is_null() || buffer.is_null() || buffer_len == 0 {
-        return 0;
-    }
+    lao_plugin_api::catch_panic_buffer_len(|| {
+        if input.is_null() || (*input).text.is_null() || buffer.is_null() || buffer_len == 0 {
+            return 0;
+        }
 
-    let c_str = std::ffi::CStr::from_ptr((*input).text);
-    let input_str = c_str.to_string_lossy();
+        let c_str = std::ffi::CStr::from_ptr((*input).text);
+        let input_str = c_str.to_string_lossy();
 
-    // Check for nonsense input
-    if input_str.contains("nonsense") || input_str.len() < 5 {
-        let output = b"error: could not generate workflow for invalid input";
-        let max_copy = std::cmp::min(output.len(), buffer_len - 1);
-        std::ptr::copy_nonoverlapping(output.as_ptr(), buffer as *mut u8, max_copy);
-        *buffer.add(max_copy) = 0;
-        return max_copy;
-    }
-
-    // Try prompt library matching
-    if let Some(library) = load_prompt_library() {
-        if let Some(workflow) = find_matching_workflow(&input_str, &library) {
-            let output = workflow.as_bytes();
+        // Check for nonsense input
+        if input_str.contains("nonsense") || input_str.len() < 5 {
+            let output = b"error: could not generate workflow for invalid input";
             let max_copy = std::cmp::min(output.len(), buffer_len - 1);
             std::ptr::copy_nonoverlapping(output.as_ptr(), buffer as *mut u8, max_copy);
             *buffer.add(max_copy) = 0;
             return max_copy;
         }
-    }
 
-    // Fallback error
-    let output = b"error: could not generate workflow for this input";
-    let max_copy = std::cmp::min(output.len(), buffer_len - 1);
-    std::ptr::copy_nonoverlapping(output.as_ptr(), buffer as *mut u8, max_copy);
-    *buffer.add(max_copy) = 0;
-    max_copy
+        // Try prompt library matching
+        if let Some(library) = load_prompt_library() {
+            if let Some(workflow) = find_matching_workflow(&input_str, &library) {
+                let output = workflow.as_bytes();
+                let max_copy = std::cmp::min(output.len(), buffer_len - 1);
+                std::ptr::copy_nonoverlapping(output.as_ptr(), buffer as *mut u8, max_copy);
+                *buffer.add(max_copy) = 0;
+                return max_copy;
+            }
+        }
+
+        // Fallback error
+        let output = b"error: could not generate workflow for this input";
+        let max_copy = std::cmp::min(output.len(), buffer_len - 1);
+        std::ptr::copy_nonoverlapping(output.as_ptr(), buffer as *mut u8, max_copy);
+        *buffer.add(max_copy) = 0;
+        max_copy
+    })
 }
 
 unsafe extern "C" fn get_metadata() -> PluginMetadata {
@@ -208,12 +210,14 @@ unsafe extern "C" fn get_metadata() -> PluginMetadata {
 }
 
 unsafe extern "C" fn validate_input(input: *const PluginInput) -> bool {
-    if input.is_null() {
-        return false;
-    }
-    let c_str = std::ffi::CStr::from_ptr((*input).text);
-    let text = c_str.to_string_lossy();
-    !text.trim().is_empty()
+    lao_plugin_api::catch_panic_bool(|| {
+        if input.is_null() || (*input).text.is_null() {
+            return false;
+        }
+        let c_str = std::ffi::CStr::from_ptr((*input).text);
+        let text = c_str.to_string_lossy();
+        !text.trim().is_empty()
+    })
 }
 
 unsafe extern "C" fn get_capabilities() -> *const c_char {
