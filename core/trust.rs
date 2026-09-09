@@ -5,7 +5,7 @@
 //!
 //! Filesystem access requires explicit `filesystem_roots` — no implicit cwd/repo roots.
 
-use crate::path_policy::{canonicalize_path, path_within_roots};
+use crate::path_policy::{canonicalize_path, path_within_roots, resolve_symlinks_best_effort};
 use crate::workflow_types::Workflow;
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -203,6 +203,10 @@ impl TrustPolicy {
         } else {
             canonical
         };
+        // Resolve symlinks (and platform aliases like macOS /tmp -> /private/tmp) so the
+        // containment check compares canonical paths against the canonical roots. A
+        // symlink inside an allowed root that points outside it is rejected here.
+        let absolute = resolve_symlinks_best_effort(&absolute);
         if !path_within_roots(&absolute, &self.filesystem_roots) {
             return Err(format!(
                 "path '{}' is outside configured filesystem_roots",
@@ -213,24 +217,26 @@ impl TrustPolicy {
     }
 
     pub fn validate_network_endpoint(&self, endpoint: &str) -> Result<(), String> {
-        if !self.allow_network && self.allow_plugins.is_empty() {
-            return Err("network access is not allowed by trust policy".to_string());
-        }
-        if self.network_endpoints.is_empty() && !self.allow_network {
+        if self.network_endpoints.is_empty() {
+            if self.allow_network {
+                // allow_network=true with no endpoint list: permit any (documented escape hatch)
+                return Ok(());
+            }
             return Err(
                 "network access denied: set trust.network_endpoints or allow_network in lao.toml"
                     .to_string(),
             );
         }
-        if self.network_endpoints.is_empty() {
-            // allow_network=true with no endpoint list: permit any (documented escape hatch)
-            return Ok(());
-        }
-        let endpoint = endpoint.trim().to_lowercase();
-        let allowed = self.network_endpoints.iter().any(|e| {
-            let e = e.trim().to_lowercase();
-            endpoint == e || endpoint.starts_with(&format!("{}/", e)) || endpoint.contains(&e)
-        });
+        let Some(target) = EndpointParts::parse(endpoint) else {
+            return Err(format!("could not parse network endpoint '{}'", endpoint));
+        };
+        // Structural match on scheme/host/port (and path prefix), never substrings:
+        // an allowlisted host cannot be smuggled into the query or path of another URL.
+        let allowed = self
+            .network_endpoints
+            .iter()
+            .filter_map(|e| EndpointParts::parse(e))
+            .any(|allow| allow.permits(&target));
         if allowed {
             Ok(())
         } else {
@@ -242,16 +248,45 @@ impl TrustPolicy {
     }
 
     /// Validate step input for known dangerous plugins before execution.
-    pub fn validate_step_input(&self, plugin_name: &str, input_text: &str) -> Result<(), String> {
+    ///
+    /// Returns `Ok(Some(text))` when the input was sanitized (e.g. a filesystem path
+    /// canonicalized) and the plugin must be invoked with the returned text instead of
+    /// the original, closing the gap between the path that was validated and the path
+    /// the plugin actually opens.
+    pub fn validate_step_input(
+        &self,
+        plugin_name: &str,
+        input_text: &str,
+    ) -> Result<Option<String>, String> {
         match plugin_name {
             "FileReadPlugin" => {
-                self.validate_filesystem_path(input_text, CapabilityClass::FilesystemRead)?;
+                let canonical =
+                    self.validate_filesystem_path(input_text, CapabilityClass::FilesystemRead)?;
+                return Ok(Some(canonical.display().to_string()));
             }
             "FolderMapPlugin" => {
-                self.validate_filesystem_path(input_text, CapabilityClass::FilesystemEnumerate)?;
+                let canonical = self
+                    .validate_filesystem_path(input_text, CapabilityClass::FilesystemEnumerate)?;
+                return Ok(Some(canonical.display().to_string()));
             }
             "MarkdownReportPlugin" => {
-                // Input is markdown body; output path comes from workflow params — checked separately.
+                // Input may be a JSON object with an optional "path" write target; gate the
+                // write through the trust policy and rewrite it to the canonical path.
+                if let Ok(serde_json::Value::Object(mut map)) =
+                    serde_json::from_str::<serde_json::Value>(input_text.trim())
+                {
+                    if let Some(path) = map.get("path").and_then(|v| v.as_str()) {
+                        let canonical =
+                            self.validate_param_path(path, CapabilityClass::FilesystemWrite)?;
+                        map.insert(
+                            "path".to_string(),
+                            serde_json::Value::String(canonical.display().to_string()),
+                        );
+                        let sanitized = serde_json::to_string(&serde_json::Value::Object(map))
+                            .map_err(|e| format!("failed to re-serialize step input: {}", e))?;
+                        return Ok(Some(sanitized));
+                    }
+                }
             }
             "SummarizerPlugin" => {
                 self.require_capability(plugin_name, CapabilityClass::Network)?;
@@ -265,7 +300,7 @@ impl TrustPolicy {
             }
             _ => {}
         }
-        Ok(())
+        Ok(None)
     }
 
     fn require_capability(&self, plugin_name: &str, class: CapabilityClass) -> Result<(), String> {
@@ -288,6 +323,18 @@ impl TrustPolicy {
         plugin_name: &str,
         capabilities: &[lao_plugin_api::PluginCapability],
     ) -> Result<(), String> {
+        // Default-deny plugins that declare no capabilities at all: with nothing
+        // declared there is nothing to reconcile, so an unknown plugin would
+        // otherwise run completely ungated. Every bundled plugin declares at least
+        // one capability; third-party plugins that declare none must be explicitly
+        // trusted via allow_plugins.
+        if capabilities.is_empty() && !self.allow_plugins.contains(plugin_name) {
+            return Err(format!(
+                "plugin '{}' declares no capabilities and is not explicitly trusted; \
+                 add it to trust.allow_plugins in lao.toml to run it",
+                plugin_name
+            ));
+        }
         for cap in capabilities {
             let Some(class) = capability_class_for_manifest(&cap.name) else {
                 continue;
@@ -309,6 +356,78 @@ impl TrustPolicy {
         class: CapabilityClass,
     ) -> Result<PathBuf, String> {
         self.validate_filesystem_path(path, class)
+    }
+}
+
+/// Structural parts of a network endpoint used for allowlist matching.
+///
+/// Matching is component-wise, never substring-based: the target's host must equal
+/// the allowlist entry's host, and when the entry specifies a scheme, port, or path
+/// prefix, those must match too. An entry like `api.local` therefore permits
+/// `http://api.local/v1` but not `http://evil.com/?q=api.local`.
+#[derive(Debug, PartialEq, Eq)]
+struct EndpointParts {
+    scheme: Option<String>,
+    host: String,
+    port: Option<String>,
+    path: String,
+}
+
+impl EndpointParts {
+    fn parse(raw: &str) -> Option<Self> {
+        let raw = raw.trim().to_lowercase();
+        if raw.is_empty() {
+            return None;
+        }
+        let (scheme, rest) = match raw.split_once("://") {
+            Some((scheme, rest)) => (Some(scheme.to_string()), rest),
+            None => (None, raw.as_str()),
+        };
+        let (authority, path) = match rest.find(['/', '?', '#']) {
+            Some(idx) => (&rest[..idx], &rest[idx..]),
+            None => (rest, ""),
+        };
+        // Strip any userinfo so `user@host` cannot masquerade as an allowed host.
+        let authority = authority
+            .rsplit_once('@')
+            .map(|(_, host)| host)
+            .unwrap_or(authority);
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((host, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => {
+                (host, Some(port.to_string()))
+            }
+            _ => (authority, None),
+        };
+        if host.is_empty() {
+            return None;
+        }
+        Some(EndpointParts {
+            scheme,
+            host: host.to_string(),
+            port,
+            path: path.to_string(),
+        })
+    }
+
+    /// Whether this allowlist entry permits the given target endpoint.
+    fn permits(&self, target: &EndpointParts) -> bool {
+        if self.host != target.host {
+            return false;
+        }
+        if let Some(scheme) = &self.scheme {
+            if target.scheme.as_deref() != Some(scheme.as_str()) {
+                return false;
+            }
+        }
+        if let Some(port) = &self.port {
+            if target.port.as_deref() != Some(port.as_str()) {
+                return false;
+            }
+        }
+        if !self.path.is_empty() && self.path != "/" {
+            return target.path.starts_with(self.path.as_str());
+        }
+        true
     }
 }
 
@@ -457,6 +576,44 @@ mod tests {
     }
 
     #[test]
+    fn network_endpoint_match_is_structural_not_substring() {
+        let mut policy = TrustPolicy::default();
+        policy.network_endpoints.push("api.local".to_string());
+        // Allowed host in the query string or path of another host must not match.
+        assert!(policy
+            .validate_network_endpoint("http://evil.com/?q=api.local")
+            .is_err());
+        assert!(policy
+            .validate_network_endpoint("http://evil.com/api.local")
+            .is_err());
+        // Userinfo smuggling must not match either.
+        assert!(policy
+            .validate_network_endpoint("http://api.local@evil.com/")
+            .is_err());
+        // The genuine host matches, with any scheme/port since the entry names none.
+        assert!(policy
+            .validate_network_endpoint("http://api.local/v1")
+            .is_ok());
+        assert!(policy
+            .validate_network_endpoint("https://api.local:8443")
+            .is_ok());
+    }
+
+    #[test]
+    fn network_endpoint_port_and_scheme_enforced_when_specified() {
+        let mut policy = TrustPolicy::default();
+        policy
+            .network_endpoints
+            .push("http://127.0.0.1:11434".to_string());
+        assert!(policy
+            .validate_network_endpoint("http://127.0.0.1:9999")
+            .is_err());
+        assert!(policy
+            .validate_network_endpoint("https://127.0.0.1:11434")
+            .is_err());
+    }
+
+    #[test]
     fn validate_step_input_blocks_untrusted_shell() {
         let policy = TrustPolicy::default();
         assert!(policy
@@ -475,22 +632,115 @@ mod tests {
 
     #[test]
     fn validate_step_input_enforces_file_roots() {
+        let root = std::env::temp_dir().join("lao_trust_test_data");
+        std::fs::create_dir_all(&root).unwrap();
         let mut policy = TrustPolicy::default();
         policy.allow_filesystem_read = true;
-        policy.filesystem_roots.push(PathBuf::from("/tmp/data"));
+        policy.filesystem_roots.push(root.clone());
         policy.normalize_roots();
         assert!(policy
             .validate_step_input("FileReadPlugin", "/etc/shadow")
             .is_err());
+        let allowed = root.join("notes.txt");
+        let sanitized = policy
+            .validate_step_input("FileReadPlugin", allowed.to_str().unwrap())
+            .unwrap();
+        // The validated path is returned canonicalized for the plugin to use.
+        assert!(sanitized.is_some());
+    }
+
+    #[test]
+    fn markdown_report_write_path_is_gated_and_canonicalized() {
+        let policy = TrustPolicy::default();
+        // Write denied entirely by default policy.
         assert!(policy
-            .validate_step_input("FileReadPlugin", "/tmp/data/notes.txt")
-            .is_ok());
+            .validate_step_input(
+                "MarkdownReportPlugin",
+                "{\"title\":\"t\",\"body\":\"b\",\"path\":\"/tmp/report.md\"}"
+            )
+            .is_err());
+        // Plain text (no write target) needs no filesystem trust.
+        assert!(policy
+            .validate_step_input("MarkdownReportPlugin", "just some notes")
+            .unwrap()
+            .is_none());
+
+        let root = std::env::temp_dir().join("lao_trust_test_reports");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut trusted = TrustPolicy::default();
+        trusted.allow_filesystem_write = true;
+        trusted.filesystem_roots.push(root.clone());
+        trusted.normalize_roots();
+
+        let inside = root.join("report.md");
+        let input = format!(
+            "{{\"title\":\"t\",\"body\":\"b\",\"path\":\"{}\"}}",
+            inside.display()
+        );
+        let sanitized = trusted
+            .validate_step_input("MarkdownReportPlugin", &input)
+            .unwrap()
+            .expect("path input should be sanitized");
+        assert!(sanitized.contains("report.md"));
+
+        // A path outside the roots is rejected even with write trust enabled.
+        let escape = format!(
+            "{{\"title\":\"t\",\"body\":\"b\",\"path\":\"{}\"}}",
+            root.join("..").join("escape.md").display()
+        );
+        assert!(trusted
+            .validate_step_input("MarkdownReportPlugin", &escape)
+            .is_err());
+    }
+
+    #[test]
+    fn symlink_escape_outside_roots_is_rejected() {
+        #[cfg(unix)]
+        {
+            let base = std::env::temp_dir().join("lao_trust_symlink_test");
+            let root = base.join("allowed");
+            let outside = base.join("outside");
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::create_dir_all(&outside).unwrap();
+            std::fs::write(outside.join("secret.txt"), "secret").unwrap();
+            let link = root.join("link");
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+            let mut policy = TrustPolicy::default();
+            policy.allow_filesystem_read = true;
+            policy.filesystem_roots.push(root.clone());
+            policy.normalize_roots();
+
+            let via_symlink = link.join("secret.txt");
+            let err = policy
+                .validate_filesystem_path(
+                    via_symlink.to_str().unwrap(),
+                    CapabilityClass::FilesystemRead,
+                )
+                .unwrap_err();
+            assert!(err.contains("outside configured filesystem_roots"));
+        }
     }
 
     #[test]
     fn validate_step_input_ignores_unknown_plugins() {
         let policy = TrustPolicy::default();
         assert!(policy.validate_step_input("EchoPlugin", "anything").is_ok());
+    }
+
+    #[test]
+    fn plugin_with_no_declared_capabilities_is_denied_by_default() {
+        let policy = TrustPolicy::default();
+        assert!(policy
+            .check_manifest_capabilities("MysteryPlugin", &[])
+            .is_err());
+
+        let mut trusted = TrustPolicy::default();
+        trusted.allow_plugins.insert("MysteryPlugin".to_string());
+        assert!(trusted
+            .check_manifest_capabilities("MysteryPlugin", &[])
+            .is_ok());
     }
 
     #[test]

@@ -46,6 +46,20 @@ pub fn validate_workflow_schema(workflow: &Workflow) -> Result<(), String> {
         "output_modality",
     ];
 
+    // Structural step fields. `#[serde(flatten)]` silently routes any unknown key
+    // into `params`, so a typo'd structural field (e.g. `input_form`) would
+    // otherwise be treated as a harmless plugin param and never take effect.
+    const STRUCTURAL_FIELDS: &[&str] = &[
+        "run",
+        "retries",
+        "retry_delay",
+        "cache_key",
+        "input_from",
+        "depends_on",
+        "condition",
+        "for_each",
+    ];
+
     for (idx, step) in workflow.steps.iter().enumerate() {
         let Some(mapping) = step.params.as_mapping() else {
             continue;
@@ -60,12 +74,57 @@ pub fn validate_workflow_schema(workflow: &Workflow) -> Result<(), String> {
                 ));
             }
         }
+
+        for key in mapping.keys().filter_map(|k| k.as_str()) {
+            if let Some(candidate) = closest_structural_field(key, STRUCTURAL_FIELDS) {
+                return Err(format!(
+                    "Unknown field '{}' in step {} (did you mean '{}'?)",
+                    key,
+                    idx + 1,
+                    candidate
+                ));
+            }
+        }
     }
 
     Ok(())
 }
 
+/// Detect a params key that is likely a misspelled structural step field.
+/// Returns the structural field it resembles, if any.
+fn closest_structural_field(key: &str, fields: &'static [&'static str]) -> Option<&'static str> {
+    // Short keys (e.g. "input", "path") are common legitimate plugin params;
+    // only flag keys long enough that a near-match is almost certainly a typo.
+    if key.len() < 7 {
+        return None;
+    }
+    fields
+        .iter()
+        .find(|field| edit_distance(key, field) <= 2)
+        .copied()
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            curr[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(curr[j] + 1);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b.len()]
+}
+
 pub fn build_dag(steps: &[WorkflowStep]) -> Result<Vec<DagNode>, String> {
+    let known_ids: std::collections::HashSet<String> = (1..=steps.len())
+        .map(|index| format!("step{}", index))
+        .collect();
+
     let mut nodes = Vec::new();
     for (index, step) in steps.iter().enumerate() {
         let mut parents = Vec::new();
@@ -76,6 +135,19 @@ pub fn build_dag(steps: &[WorkflowStep]) -> Result<Vec<DagNode>, String> {
             parents.extend(depends_on.clone());
         }
         let step_id = format!("step{}", index + 1);
+        // A dangling reference would silently be treated as "already satisfied"
+        // during level grouping; reject it up front instead.
+        for parent in &parents {
+            if !known_ids.contains(parent) {
+                return Err(format!(
+                    "Step {} ('{}') references unknown step id '{}' (valid ids: step1..step{})",
+                    index + 1,
+                    step.run,
+                    parent,
+                    steps.len()
+                ));
+            }
+        }
         nodes.push(DagNode {
             id: step_id,
             step: step.clone(),
@@ -277,6 +349,43 @@ mod tests {
         let dag = build_dag(&steps).unwrap();
         let order = topo_sort(&dag).unwrap();
         assert_eq!(order, vec!["step1", "step2"]);
+    }
+
+    #[test]
+    fn test_build_dag_rejects_dangling_reference() {
+        let steps = vec![WorkflowStep {
+            run: "EchoPlugin".to_string(),
+            params: serde_yaml::Value::Null,
+            retries: None,
+            retry_delay: None,
+            cache_key: None,
+            input_from: None,
+            depends_on: Some(vec!["step9".to_string()]),
+            condition: None,
+            for_each: None,
+        }];
+        let err = build_dag(&steps).unwrap_err();
+        assert!(err.contains("unknown step id 'step9'"));
+    }
+
+    #[test]
+    fn test_schema_flags_misspelled_structural_field() {
+        let workflow: Workflow = serde_yaml::from_str(
+            "workflow: test\nsteps:\n  - run: EchoPlugin\n    input_form: step1\n",
+        )
+        .unwrap();
+        let err = validate_workflow_schema(&workflow).unwrap_err();
+        assert!(err.contains("input_form"));
+        assert!(err.contains("input_from"));
+    }
+
+    #[test]
+    fn test_schema_allows_ordinary_plugin_params() {
+        let workflow: Workflow = serde_yaml::from_str(
+            "workflow: test\nsteps:\n  - run: EchoPlugin\n    input: hello\n    pattern: abc\n",
+        )
+        .unwrap();
+        assert!(validate_workflow_schema(&workflow).is_ok());
     }
 
     #[test]

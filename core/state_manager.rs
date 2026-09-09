@@ -1,7 +1,21 @@
+use crate::path_policy::validate_identifier;
 use crate::workflow_state::{WorkflowState, WorkflowStatus};
 use std::collections::HashMap;
 use std::fs;
+use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
+
+/// Workflow ids are interpolated into state file paths; reject anything that
+/// could traverse outside the state directory.
+fn checked_id(workflow_id: &str) -> std::io::Result<&str> {
+    validate_identifier(workflow_id).map_err(|e| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!("invalid workflow id: {}", e),
+        )
+    })?;
+    Ok(workflow_id)
+}
 
 pub struct WorkflowStateManager {
     state_dir: PathBuf,
@@ -23,7 +37,9 @@ impl WorkflowStateManager {
     }
 
     pub fn save_state(&mut self, state: &WorkflowState) -> std::io::Result<()> {
-        let file_path = self.state_dir.join(format!("{}.json", state.workflow_id));
+        let file_path = self
+            .state_dir
+            .join(format!("{}.json", checked_id(&state.workflow_id)?));
         let json = serde_json::to_string_pretty(state)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         fs::write(file_path, json)?;
@@ -32,7 +48,9 @@ impl WorkflowStateManager {
     }
 
     pub fn load_state(&self, workflow_id: &str) -> std::io::Result<Option<WorkflowState>> {
-        let file_path = self.state_dir.join(format!("{}.json", workflow_id));
+        let file_path = self
+            .state_dir
+            .join(format!("{}.json", checked_id(workflow_id)?));
         if !file_path.exists() {
             return Ok(None);
         }
@@ -44,7 +62,9 @@ impl WorkflowStateManager {
     }
 
     pub fn delete_state(&mut self, workflow_id: &str) -> std::io::Result<()> {
-        let file_path = self.state_dir.join(format!("{}.json", workflow_id));
+        let file_path = self
+            .state_dir
+            .join(format!("{}.json", checked_id(workflow_id)?));
         if file_path.exists() {
             fs::remove_file(file_path)?;
         }

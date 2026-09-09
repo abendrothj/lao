@@ -76,8 +76,16 @@ pub fn build_plugin_input(params: &serde_yaml::Value) -> OwnedPluginInput {
 }
 
 // Compute default cache key when user does not provide one.
-pub fn compute_default_cache_key(step: &WorkflowStep, plugin_version: &str) -> String {
-    let params_str = serde_yaml::to_string(&step.params).unwrap_or_default();
+//
+// Keys are derived from the *substituted* runtime params (post `${...}` and
+// `input_from` wiring), so two runs with different upstream outputs never share
+// a cache entry.
+pub fn compute_default_cache_key(
+    step: &WorkflowStep,
+    params: &serde_yaml::Value,
+    plugin_version: &str,
+) -> String {
+    let params_str = serde_yaml::to_string(params).unwrap_or_default();
     let mut hash: u64 = 1469598103934665603; // FNV-1a 64-bit offset basis
     for b in params_str.as_bytes() {
         hash ^= *b as u64;

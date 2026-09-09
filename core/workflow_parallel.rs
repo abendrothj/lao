@@ -1,13 +1,13 @@
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::cross_platform::PathUtils;
 use crate::plugins::PluginRegistry;
 use crate::state_manager::WorkflowStateManager;
-use crate::step_executor::StepExecutor;
+use crate::step_executor::{lock_or_recover, StepExecutor};
 use crate::trust::TrustPolicy;
 use crate::workflow_dag::*;
 use crate::workflow_state::{StepResult, StepStatus, WorkflowState};
@@ -153,10 +153,13 @@ where
     let trust_policy = TrustPolicy::load_default();
     trust_policy.validate_workflow(&workflow)?;
     let dag = build_dag(&workflow.steps)?;
+    // Reject cyclic workflows up front: level grouping alone would silently drop
+    // the steps stuck in a cycle and report success.
+    topo_sort(&dag)?;
     let registry = Arc::new(Mutex::new(PluginRegistry::default_registry()));
 
     {
-        let reg_guard = registry.lock().expect("plugin registry mutex poisoned");
+        let reg_guard = lock_or_recover(&registry);
         let plugin_count = reg_guard.plugin_count();
         if plugin_count == 0 {
             tracing::error!(" No plugins loaded! Cannot validate workflow.");
@@ -207,12 +210,60 @@ where
 
     let (event_tx, event_rx) = std::sync::mpsc::channel::<StepEvent>();
 
+    // Step ids whose execution failed (or was blocked by a failed dependency).
+    // Dependents without an explicit condition are blocked instead of running
+    // with silently missing inputs.
+    let mut failed_steps: HashSet<String> = HashSet::new();
+
     for level in execution_levels {
+        let mut runnable = Vec::new();
+        for node_id in level {
+            let Some(node) = node_map.get(&node_id) else {
+                tracing::error!(" Node '{}' not found in DAG during execution", node_id);
+                continue;
+            };
+            let failed_parent = node
+                .parents
+                .iter()
+                .find(|parent| failed_steps.contains(*parent));
+            // Steps with an explicit condition may intentionally handle upstream
+            // failure (e.g. StatusEquals "error"), so only unconditioned steps
+            // are blocked.
+            if let (Some(parent), None) = (failed_parent, node.step.condition.as_ref()) {
+                let error_msg = format!("dependency '{}' failed; step not executed", parent);
+                let step_idx = step_counter.fetch_add(1, Ordering::SeqCst);
+                let _ = event_tx.send(StepEvent {
+                    step: step_idx,
+                    step_id: node_id.clone(),
+                    runner: node.step.run.clone(),
+                    status: "skipped".to_string(),
+                    attempt: 1,
+                    message: Some("dependency failed".to_string()),
+                    output: None,
+                    error: Some(error_msg.clone()),
+                });
+                lock_or_recover(&logs_mutex).push(StepLog {
+                    step: step_idx,
+                    step_id: node_id.clone(),
+                    runner: node.step.run.clone(),
+                    input: node.step.params.clone(),
+                    output: None,
+                    error: Some(error_msg),
+                    attempt: 1,
+                    input_type: None,
+                    output_type: None,
+                    validation: Some("blocked".to_string()),
+                });
+                failed_steps.insert(node_id);
+                continue;
+            }
+            runnable.push(node_id);
+        }
+
         if parallel {
             let mut handles = Vec::new();
-            for node_id in level {
+            for node_id in runnable {
                 let Some(node) = node_map.get(&node_id) else {
-                    tracing::error!(" Node '{}' not found in DAG during execution", node_id);
                     continue;
                 };
                 let step = node.step.clone();
@@ -226,13 +277,22 @@ where
                 }
             }
         } else {
-            for node_id in level {
+            for node_id in runnable {
                 let Some(node) = node_map.get(&node_id) else {
-                    tracing::error!(" Node '{}' not found in DAG during execution", node_id);
                     continue;
                 };
                 let step = node.step.clone();
                 executor.execute(node_id, step, &event_tx);
+            }
+        }
+
+        // Record this level's failures so later levels can block on them.
+        {
+            let logs_guard = lock_or_recover(&logs_mutex);
+            for log in logs_guard.iter() {
+                if log.error.is_some() {
+                    failed_steps.insert(log.step_id.clone());
+                }
             }
         }
     }
@@ -253,7 +313,7 @@ where
     }
 
     let mut logs = {
-        let logs_guard = logs_mutex.lock().expect("logs mutex poisoned");
+        let logs_guard = lock_or_recover(&logs_mutex);
         logs_guard.clone()
     };
 

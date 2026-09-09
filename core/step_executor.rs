@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::{
     env as std_env, fs, thread,
     time::{Duration, Instant},
@@ -24,6 +24,17 @@ use crate::workflow_types::*;
 pub(crate) type SharedOutputs = Arc<Mutex<HashMap<String, String>>>;
 pub(crate) type SharedLogs = Arc<Mutex<Vec<StepLog>>>;
 pub(crate) type SharedRegistry = Arc<Mutex<PluginRegistry>>;
+
+/// Lock a mutex, recovering from poisoning instead of panicking.
+///
+/// A panicking step thread must not cascade into host crashes for every later
+/// step: the shared maps/vecs remain structurally valid, so recovering the
+/// guard is safe and the failed step is already reported through its own log.
+pub(crate) fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// Shared, thread-safe state threaded through every step of one workflow run.
 pub struct StepExecutor {
@@ -59,7 +70,7 @@ impl StepExecutor {
     }
 
     fn push_log(&self, log: StepLog) {
-        self.logs.lock().expect("logs mutex poisoned").push(log);
+        lock_or_recover(&self.logs).push(log);
     }
 
     /// Execute a single workflow step end to end, emitting events and recording a log.
@@ -67,7 +78,7 @@ impl StepExecutor {
         let step_idx = self.step_counter.fetch_add(1, Ordering::SeqCst);
 
         let should_execute = {
-            let logs_guard = self.logs.lock().expect("logs mutex poisoned");
+            let logs_guard = lock_or_recover(&self.logs);
             let dependent_step = step.depends_on.as_ref().and_then(|deps| deps.first());
             should_execute_step(&step, &logs_guard, dependent_step.map(|s| s.as_str()))
         };
@@ -101,7 +112,7 @@ impl StepExecutor {
         // Build params with outputs from previous steps.
         let mut params = step.params.clone();
         {
-            let outputs_guard = self.outputs.lock().expect("outputs mutex poisoned");
+            let outputs_guard = lock_or_recover(&self.outputs);
             substitute_params(&mut params, &outputs_guard);
 
             if let Some(input_from) = &step.input_from {
@@ -141,7 +152,7 @@ impl StepExecutor {
     ) {
         let loop_config = step.for_each.as_ref().expect("checked by caller");
         let outputs_map: HashMap<String, String> = {
-            let outputs_guard = self.outputs.lock().expect("outputs mutex poisoned");
+            let outputs_guard = lock_or_recover(&self.outputs);
             outputs_guard.clone()
         };
 
@@ -156,7 +167,14 @@ impl StepExecutor {
             error: None,
         });
 
-        match execute_with_loop(&step, loop_config, &params, &outputs_map, &self.registry) {
+        match execute_with_loop(
+            &step,
+            loop_config,
+            &params,
+            &outputs_map,
+            &self.registry,
+            &self.trust,
+        ) {
             Ok(loop_results) => {
                 let output_str =
                     serde_json::to_string(&loop_results).unwrap_or_else(|_| "[]".to_string());
@@ -172,10 +190,7 @@ impl StepExecutor {
                     error: None,
                 });
 
-                self.outputs
-                    .lock()
-                    .expect("outputs mutex poisoned")
-                    .insert(node_id.clone(), output_str.clone());
+                lock_or_recover(&self.outputs).insert(node_id.clone(), output_str.clone());
 
                 self.push_log(StepLog {
                     step: step_idx,
@@ -226,20 +241,18 @@ impl StepExecutor {
         params: serde_yaml::Value,
         event_tx: &Sender<StepEvent>,
     ) {
-        let plugin_input = build_plugin_input(&params);
         let input_text = plugin_input_text(&params);
 
-        let plugin_info = {
-            let reg_guard = self
-                .registry
-                .lock()
-                .expect("plugin registry mutex poisoned");
-            reg_guard
-                .get(&step.run)
-                .map(|p| (p.info.name.clone(), p.info.version.clone()))
+        // Clone the plugin out of a short-lived registry lock so plugin execution
+        // never happens while holding the mutex: parallel levels actually run
+        // concurrently and a hung plugin cannot deadlock unrelated steps. The
+        // clone's Arc<Library> keeps the shared library alive for the call.
+        let plugin = {
+            let reg_guard = lock_or_recover(&self.registry);
+            reg_guard.get(&step.run).cloned()
         };
 
-        let Some((_, plugin_version)) = plugin_info else {
+        let Some(plugin) = plugin else {
             let _ = event_tx.send(StepEvent {
                 step: step_idx,
                 step_id: node_id.clone(),
@@ -266,22 +279,89 @@ impl StepExecutor {
         };
 
         let plugin_name = step.run.clone();
+        let plugin_version = plugin.info.version.clone();
         let max_attempts = step.retries.unwrap_or(1) + 1;
         let mut last_error = None;
 
+        // Trust validation happens exactly once, before any cache lookup or plugin
+        // invocation: a denial is not retryable and a cached result must never be
+        // served for a step the current policy would refuse to run.
+        let sanitized_input = match self.trust.validate_step_input(&plugin_name, &input_text) {
+            Ok(sanitized) => sanitized,
+            Err(e) => {
+                let _ = event_tx.send(StepEvent {
+                    step: step_idx,
+                    step_id: node_id.clone(),
+                    runner: plugin_name.clone(),
+                    status: "error".to_string(),
+                    attempt: 1,
+                    message: Some("trust policy denied step input".to_string()),
+                    output: None,
+                    error: Some(e.clone()),
+                });
+                self.push_log(StepLog {
+                    step: step_idx,
+                    step_id: node_id,
+                    runner: plugin_name,
+                    input: params,
+                    output: None,
+                    error: Some(e),
+                    attempt: 1,
+                    input_type: None,
+                    output_type: None,
+                    validation: Some("trust-denied".to_string()),
+                });
+                return;
+            }
+        };
+
+        // When trust validation sanitized the input (e.g. canonicalized a filesystem
+        // path), the plugin must run with the validated text, not the raw one.
+        let plugin_input = match sanitized_input {
+            Some(text) => OwnedPluginInput::new(text),
+            None => build_plugin_input(&params),
+        };
+
         let mut cache_status = None;
+        // User-supplied cache keys are interpolated into a filesystem path; reject
+        // anything that could traverse outside the cache directory.
+        if let Some(user_key) = &step.cache_key {
+            if let Err(e) = crate::path_policy::validate_identifier(user_key) {
+                let msg = format!("invalid cache_key: {}", e);
+                let _ = event_tx.send(StepEvent {
+                    step: step_idx,
+                    step_id: node_id.clone(),
+                    runner: plugin_name.clone(),
+                    status: "error".to_string(),
+                    attempt: 1,
+                    message: None,
+                    output: None,
+                    error: Some(msg.clone()),
+                });
+                self.push_log(StepLog {
+                    step: step_idx,
+                    step_id: node_id,
+                    runner: plugin_name,
+                    input: params,
+                    output: None,
+                    error: Some(msg),
+                    attempt: 1,
+                    input_type: None,
+                    output_type: None,
+                    validation: None,
+                });
+                return;
+            }
+        }
         let cache_key_effective = step
             .cache_key
             .clone()
-            .unwrap_or_else(|| compute_default_cache_key(&step, &plugin_version));
+            .unwrap_or_else(|| compute_default_cache_key(&step, &params, &plugin_version));
         let cache_path = format!("{}/{}.json", self.cache_dir, cache_key_effective);
 
         if let Ok(cached) = fs::read_to_string(&cache_path) {
             if let Ok(cached_output) = serde_json::from_str::<String>(&cached) {
-                self.outputs
-                    .lock()
-                    .expect("outputs mutex poisoned")
-                    .insert(node_id.clone(), cached_output.clone());
+                lock_or_recover(&self.outputs).insert(node_id.clone(), cached_output.clone());
                 let _ = event_tx.send(StepEvent {
                     step: step_idx,
                     step_id: node_id.clone(),
@@ -325,24 +405,7 @@ impl StepExecutor {
             });
 
             let attempt_start = Instant::now();
-            let run_result: PluginRunResult = {
-                if let Err(e) = self.trust.validate_step_input(&plugin_name, &input_text) {
-                    PluginRunResult::runtime_error(e)
-                } else {
-                    let reg_guard = self
-                        .registry
-                        .lock()
-                        .expect("plugin registry mutex poisoned");
-                    if let Some(plugin) = reg_guard.get(&plugin_name) {
-                        plugin.run_plugin(&plugin_input)
-                    } else {
-                        PluginRunResult::runtime_error(format!(
-                            "Plugin '{}' not found",
-                            plugin_name
-                        ))
-                    }
-                }
-            };
+            let run_result: PluginRunResult = plugin.run_plugin(&plugin_input);
 
             // Adapt the plugin's ABI-derived outcome into the structured StepResult
             // model. This is purely additive: `step_result`'s success/failure and
@@ -361,10 +424,7 @@ impl StepExecutor {
 
             if step_result.is_success() {
                 let output_str = step_result.primary_output_text().unwrap_or_default();
-                self.outputs
-                    .lock()
-                    .expect("outputs mutex poisoned")
-                    .insert(node_id.clone(), output_str.clone());
+                lock_or_recover(&self.outputs).insert(node_id.clone(), output_str.clone());
 
                 if step.cache_key.is_some() {
                     fs::create_dir_all(&self.cache_dir).ok();
@@ -441,12 +501,17 @@ impl StepExecutor {
 }
 
 /// Execute a step once per loop item, optionally collecting per-iteration outputs.
+///
+/// Every iteration is routed through the same trust gate as single-step execution:
+/// per-item inputs (e.g. filesystem paths produced by an upstream step) are
+/// validated — and sanitized where applicable — before the plugin runs.
 pub fn execute_with_loop(
     step: &WorkflowStep,
     loop_config: &LoopConfig,
     base_params: &serde_yaml::Value,
     outputs: &HashMap<String, String>,
     registry: &SharedRegistry,
+    trust: &TrustPolicy,
 ) -> Result<Vec<String>, String> {
     let items = match &loop_config.items {
         LoopItems::Array(arr) => arr.clone(),
@@ -473,6 +538,7 @@ pub fn execute_with_loop(
             let step_clone = step.clone();
             let mut params = base_params.clone();
             let registry_clone = registry.clone();
+            let trust_clone = trust.clone();
             let item_clone = item.clone();
             let var_name = loop_config.var.clone();
 
@@ -481,13 +547,25 @@ pub fn execute_with_loop(
                     mapping.insert(serde_yaml::Value::String(var_name), item_clone);
                 }
 
-                let plugin_input = build_plugin_input(&params);
-                let reg_guard = registry_clone
-                    .lock()
-                    .expect("plugin registry mutex poisoned");
-                let plugin_opt = reg_guard.get(&step_clone.run);
+                // Same trust gate as `execute_plugin_step`: validate (and possibly
+                // sanitize) this iteration's input before invoking the plugin.
+                let input_text = plugin_input_text(&params);
+                let sanitized = trust_clone
+                    .validate_step_input(&step_clone.run, &input_text)
+                    .map_err(|e| format!("trust policy denied loop iteration: {}", e))?;
+                let plugin_input = match sanitized {
+                    Some(text) => OwnedPluginInput::new(text),
+                    None => build_plugin_input(&params),
+                };
 
-                if let Some(plugin) = plugin_opt {
+                // Clone the plugin out of a short-lived lock so iterations in the
+                // same chunk actually run in parallel.
+                let plugin = {
+                    let reg_guard = lock_or_recover(&registry_clone);
+                    reg_guard.get(&step_clone.run).cloned()
+                };
+
+                if let Some(plugin) = plugin {
                     let result = plugin.run_plugin(&plugin_input);
                     if result.is_success() {
                         Ok(result.output.unwrap_or_default())
