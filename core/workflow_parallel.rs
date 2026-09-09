@@ -144,23 +144,6 @@ pub fn run_workflow_with_options<F>(
     parallel: bool,
     record_state: bool,
     state_dir: &str,
-    on_event: F,
-) -> Result<Vec<StepLog>, String>
-where
-    F: FnMut(StepEvent) + Send,
-{
-    run_workflow_with_options_and_invoker(path, parallel, record_state, state_dir, None, on_event)
-}
-
-/// Same as `run_workflow_with_options`, plus an optional `ModelInvoker` for `run:
-/// local_llm` steps. Split out rather than adding a parameter to the existing function
-/// so every pre-existing caller (CLI, tests, `WorkflowExecutor`) is unaffected.
-pub fn run_workflow_with_options_and_invoker<F>(
-    path: &str,
-    parallel: bool,
-    record_state: bool,
-    state_dir: &str,
-    model_invoker: Option<Arc<dyn crate::model::ModelInvoker>>,
     mut on_event: F,
 ) -> Result<Vec<StepLog>, String>
 where
@@ -175,11 +158,7 @@ where
     {
         let reg_guard = registry.lock().expect("plugin registry mutex poisoned");
         let plugin_count = reg_guard.plugin_count();
-        let needs_plugins = dag
-            .iter()
-            .any(|node| node.step.run != crate::step_executor::LOCAL_LLM_STEP_NAME);
-
-        if plugin_count == 0 && needs_plugins {
+        if plugin_count == 0 {
             tracing::error!(" No plugins loaded! Cannot validate workflow.");
             tracing::info!(
                 " Expected plugins directory: {}",
@@ -218,17 +197,13 @@ where
     let logs_mutex = Arc::new(Mutex::new(Vec::<StepLog>::new()));
     let step_counter = Arc::new(AtomicUsize::new(0));
 
-    let mut executor = StepExecutor::new(
+    let executor = Arc::new(StepExecutor::new(
         registry.clone(),
         trust_policy,
         outputs.clone(),
         logs_mutex.clone(),
         step_counter.clone(),
-    );
-    if let Some(invoker) = model_invoker {
-        executor = executor.with_model_invoker(invoker);
-    }
-    let executor = Arc::new(executor);
+    ));
 
     let (event_tx, event_rx) = std::sync::mpsc::channel::<StepEvent>();
 

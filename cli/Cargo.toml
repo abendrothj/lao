@@ -9,14 +9,10 @@ authors.workspace = true
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
 lao-orchestrator-core = { path = "../core" }
-lao-worker = { path = "../worker" }
 lao_plugin_api = { path = "../lao_plugin_api" }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
-toml = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 uuid = { version = "1.0", features = ["v4"] }
 

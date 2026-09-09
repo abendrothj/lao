@@ -4,8 +4,6 @@
 pub mod code_intelligence;
 pub mod cross_platform;
 pub mod execution;
-pub mod local_llm;
-pub mod model;
 pub mod path_policy;
 pub mod plugin_result;
 pub mod plugins;

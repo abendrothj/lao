@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "core",
     "cli",
-    "worker",
     "lao_plugin_api",
     "plugins/*",
 ]

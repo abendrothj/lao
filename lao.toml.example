@@ -7,12 +7,6 @@ allow_shell = false
 allow_network = false
 allow_subprocess = false
 allow_code_graph_read = false
-# v0.5 local model inference (see docs/local-inference.md)
-allow_model_inference = false
-allow_model_load = false
-allow_network_loopback = false
-allow_network_private = false
-allow_accelerator_use = false
 
 # Explicit filesystem roots only — no implicit cwd/repo root.
 # Required when any filesystem_* capability is enabled.

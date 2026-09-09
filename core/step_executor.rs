@@ -15,10 +15,6 @@ use std::{
 };
 
 use crate::execution::{legacy_adapter, StepMetadata};
-use crate::local_llm;
-use crate::model::{
-    ModelInvoker, ModelRequest, ModelResponseStatus, ModelRole, ModelSelector, RequestId,
-};
 use crate::plugin_result::PluginRunResult;
 use crate::plugins::PluginRegistry;
 use crate::trust::TrustPolicy;
@@ -29,10 +25,6 @@ pub(crate) type SharedOutputs = Arc<Mutex<HashMap<String, String>>>;
 pub(crate) type SharedLogs = Arc<Mutex<Vec<StepLog>>>;
 pub(crate) type SharedRegistry = Arc<Mutex<PluginRegistry>>;
 
-/// The `run:` name that dispatches to a `ModelInvoker` instead of the plugin
-/// registry. Not a real plugin — no dlopen, no C ABI involved.
-pub const LOCAL_LLM_STEP_NAME: &str = "local_llm";
-
 /// Shared, thread-safe state threaded through every step of one workflow run.
 pub struct StepExecutor {
     registry: SharedRegistry,
@@ -41,7 +33,6 @@ pub struct StepExecutor {
     logs: SharedLogs,
     step_counter: Arc<AtomicUsize>,
     cache_dir: String,
-    model_invoker: Option<Arc<dyn ModelInvoker>>,
 }
 
 impl StepExecutor {
@@ -60,16 +51,7 @@ impl StepExecutor {
             logs,
             step_counter,
             cache_dir,
-            model_invoker: None,
         }
-    }
-
-    /// Enable `run: local_llm` steps by giving the executor something to invoke them
-    /// through. Without this, `local_llm` steps fail with a clear "no model invoker
-    /// configured" error rather than a confusing "plugin not found".
-    pub fn with_model_invoker(mut self, invoker: Arc<dyn ModelInvoker>) -> Self {
-        self.model_invoker = Some(invoker);
-        self
     }
 
     pub fn registry(&self) -> &SharedRegistry {
@@ -141,237 +123,12 @@ impl StepExecutor {
             }
         }
 
-        if step.run == LOCAL_LLM_STEP_NAME {
-            self.execute_local_llm_step(step_idx, node_id, step, params, event_tx);
-            return;
-        }
-
         if step.for_each.is_some() {
             self.execute_loop_step(step_idx, node_id, step, params, event_tx);
             return;
         }
 
         self.execute_plugin_step(step_idx, node_id, step, params, event_tx);
-    }
-
-    /// `run: local_llm` steps never touch the plugin registry or the C ABI — they
-    /// build a `ModelRequest` from the step's `with:` block (plus any `input_from`
-    /// text already injected into `params["input"]`) and dispatch it through the
-    /// configured `ModelInvoker`. Retries/events/logs follow the same shape as
-    /// `execute_plugin_step` so downstream consumers (CLI, condition evaluation,
-    /// state persistence) need no `local_llm`-specific handling.
-    fn execute_local_llm_step(
-        &self,
-        step_idx: usize,
-        node_id: String,
-        step: WorkflowStep,
-        params: serde_yaml::Value,
-        event_tx: &Sender<StepEvent>,
-    ) {
-        let runner = step.run.clone();
-        let Some(invoker) = self.model_invoker.clone() else {
-            let message = "local_llm step requires a configured ModelInvoker".to_string();
-            let _ = event_tx.send(StepEvent {
-                step: step_idx,
-                step_id: node_id.clone(),
-                runner: runner.clone(),
-                status: "error".to_string(),
-                attempt: 1,
-                message: Some(message.clone()),
-                output: None,
-                error: Some(message.clone()),
-            });
-            self.push_log(StepLog {
-                step: step_idx,
-                step_id: node_id,
-                runner,
-                input: params,
-                output: None,
-                error: Some(message),
-                attempt: 1,
-                input_type: None,
-                output_type: None,
-                validation: None,
-            });
-            return;
-        };
-
-        if !self
-            .trust
-            .allows_class(crate::trust::CapabilityClass::ModelInference)
-        {
-            let message =
-                "local_llm requires trust.allow_model_inference = true in lao.toml".to_string();
-            let _ = event_tx.send(StepEvent {
-                step: step_idx,
-                step_id: node_id.clone(),
-                runner: runner.clone(),
-                status: "error".to_string(),
-                attempt: 1,
-                message: Some(message.clone()),
-                output: None,
-                error: Some(message.clone()),
-            });
-            self.push_log(StepLog {
-                step: step_idx,
-                step_id: node_id,
-                runner,
-                input: params,
-                output: None,
-                error: Some(message),
-                attempt: 1,
-                input_type: None,
-                output_type: None,
-                validation: None,
-            });
-            return;
-        }
-
-        let with = local_llm::parse_with(&params);
-        let injected_input = params
-            .as_mapping()
-            .and_then(|m| m.get(serde_yaml::Value::String("input".to_string())))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let (messages, truncated) = local_llm::assemble_prompt(&with, injected_input.as_deref());
-
-        let request_base = ModelRequest {
-            request_id: RequestId::generate(),
-            role: with
-                .role
-                .as_deref()
-                .map(ModelRole::parse)
-                .unwrap_or_else(|| ModelRole::Custom("unspecified".to_string())),
-            model: with.model.clone().map(ModelSelector::Alias),
-            messages,
-            parameters: with.generation.clone(),
-            requirements: with.requirements.clone(),
-            inputs: vec![],
-            metadata: std::collections::BTreeMap::new(),
-        };
-
-        if let Err(e) = request_base.validate() {
-            let message = e.to_string();
-            let _ = event_tx.send(StepEvent {
-                step: step_idx,
-                step_id: node_id.clone(),
-                runner: runner.clone(),
-                status: "error".to_string(),
-                attempt: 1,
-                message: Some(message.clone()),
-                output: None,
-                error: Some(message.clone()),
-            });
-            self.push_log(StepLog {
-                step: step_idx,
-                step_id: node_id,
-                runner,
-                input: params,
-                output: None,
-                error: Some(message),
-                attempt: 1,
-                input_type: None,
-                output_type: None,
-                validation: None,
-            });
-            return;
-        }
-
-        let max_attempts = step.retries.unwrap_or(1) + 1;
-        let mut last_error = None;
-
-        for attempt in 1..=max_attempts {
-            let _ = event_tx.send(StepEvent {
-                step: step_idx,
-                step_id: node_id.clone(),
-                runner: runner.clone(),
-                status: "running".to_string(),
-                attempt,
-                message: if attempt > 1 {
-                    Some("retrying".to_string())
-                } else {
-                    None
-                },
-                output: None,
-                error: None,
-            });
-
-            let mut request = request_base.clone();
-            request.request_id = RequestId::generate();
-            let response = invoker.invoke(request);
-
-            if response.status == ModelResponseStatus::Success {
-                let mut output_str = local_llm::artifact_to_text(&response.output);
-                if truncated {
-                    output_str.push_str(
-                        "\n[lao: input artifact was truncated before reaching the model]",
-                    );
-                }
-                self.outputs
-                    .lock()
-                    .expect("outputs mutex poisoned")
-                    .insert(node_id.clone(), output_str.clone());
-
-                let _ = event_tx.send(StepEvent {
-                    step: step_idx,
-                    step_id: node_id.clone(),
-                    runner: runner.clone(),
-                    status: "success".to_string(),
-                    attempt,
-                    message: None,
-                    output: Some(output_str.clone()),
-                    error: None,
-                });
-                self.push_log(StepLog {
-                    step: step_idx,
-                    step_id: node_id,
-                    runner,
-                    input: params,
-                    output: Some(output_str),
-                    error: None,
-                    attempt,
-                    input_type: None,
-                    output_type: None,
-                    validation: None,
-                });
-                return;
-            }
-
-            let message = response.error.map(|e| e.to_string()).unwrap_or_else(|| {
-                format!("local_llm step failed with status {:?}", response.status)
-            });
-            last_error = Some(message.clone());
-            let _ = event_tx.send(StepEvent {
-                step: step_idx,
-                step_id: node_id.clone(),
-                runner: runner.clone(),
-                status: "error".to_string(),
-                attempt,
-                message: Some("attempt failed".to_string()),
-                output: None,
-                error: Some(message),
-            });
-
-            if attempt < max_attempts {
-                let retry_delay = step.retry_delay.unwrap_or(1000);
-                thread::sleep(Duration::from_millis(retry_delay));
-            }
-        }
-
-        if let Some(error) = last_error {
-            self.push_log(StepLog {
-                step: step_idx,
-                step_id: node_id,
-                runner,
-                input: params,
-                output: None,
-                error: Some(error),
-                attempt: max_attempts,
-                input_type: None,
-                output_type: None,
-                validation: None,
-            });
-        }
     }
 
     fn execute_loop_step(

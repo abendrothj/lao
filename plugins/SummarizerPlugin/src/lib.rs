@@ -138,7 +138,6 @@ pub extern "C" fn plugin_vtable() -> PluginVTablePtr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lao_plugin_api::*;
     use std::ffi::CString;
 
     #[test]

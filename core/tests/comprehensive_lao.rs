@@ -1,14 +1,12 @@
 use lao_orchestrator_core::cross_platform::PathUtils;
 use lao_orchestrator_core::plugins::PluginRegistry;
 use lao_orchestrator_core::{
-    build_dag, run_workflow_yaml, run_workflow_yaml_parallel_with_callback,
-    run_workflow_yaml_with_callback, validate_workflow_types, StepEvent, Workflow, WorkflowStep,
+    build_dag, run_workflow_yaml, validate_workflow_types, Workflow, WorkflowStep,
 };
 use lao_plugin_api::PluginInput;
 use serial_test::serial;
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 
 // Helper function to check if required plugins are available
 fn check_plugins_available(required_plugins: &[&str]) -> bool {
@@ -192,11 +190,6 @@ fn test_workflow_invalid_step() {
             for_each: None,
         }],
     };
-    let dag = build_dag(&workflow.steps).unwrap();
-    let plugin_dir = PathUtils::plugin_dir();
-    let reg = PluginRegistry::dynamic_registry(plugin_dir.to_str().unwrap_or("plugins"));
-    let errors = validate_workflow_types(&dag, &reg);
-    // Should not error at type level, but runtime may fail
     let path = "temp_invalid.yaml";
     fs::write(path, serde_yaml::to_string(&workflow).unwrap()).unwrap();
 

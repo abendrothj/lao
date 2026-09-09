@@ -130,12 +130,6 @@ pub fn validate_workflow_types(
 ) -> Vec<(usize, String)> {
     let mut errors = Vec::new();
     for (i, node) in dag.iter().enumerate() {
-        if node.step.run == crate::step_executor::LOCAL_LLM_STEP_NAME {
-            // Dispatches through a ModelInvoker, not the plugin registry - see
-            // StepExecutor::execute_local_llm_step. No plugin-capability type check
-            // applies here.
-            continue;
-        }
         let Some(curr_plugin) = plugin_registry.get(&node.step.run) else {
             errors.push((i, format!("Plugin '{}' not found", node.step.run)));
             continue;

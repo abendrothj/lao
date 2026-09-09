@@ -83,20 +83,6 @@ Writing your own plugin is a matter of implementing the C vtable — see
 `lao_plugin_api`, [docs/plugin-api.md](docs/plugin-api.md), and the bundled
 plugins for examples.
 
-## Local model inference (v0.5)
-
-LAO can run local language models through a supervised `llama-server` (llama.cpp)
-process, route requests across one or more registered workers, and invoke a model from
-a `run: local_llm` workflow step:
-
-```bash
-lao-cli worker serve --config lao.toml &
-lao-cli models generate --role reasoning --prompt "Say hello in one word."
-lao-cli run workflows/local_llm_example.yaml
-```
-
-See [docs/local-inference.md](docs/local-inference.md) for worker/model registry
-configuration, a full setup walkthrough, security guidance, and hardware notes.
 
 ## Configuration
 

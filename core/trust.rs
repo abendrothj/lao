@@ -23,17 +23,6 @@ pub enum CapabilityClass {
     Subprocess,
     /// Read-only access to the structural code graph via a `CodeIntelligenceProvider`.
     CodeGraphRead,
-    /// Running a `run: local_llm` workflow step at all.
-    ModelInference,
-    /// Loading/unloading a model on a worker (distinct from just running inference
-    /// against an already-loaded model).
-    ModelLoad,
-    /// Talking to a worker bound to loopback (127.0.0.1/::1).
-    NetworkLoopback,
-    /// Talking to a worker on a private/LAN address, not loopback.
-    NetworkPrivate,
-    /// Requesting GPU/accelerator offload for a model.
-    AcceleratorUse,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -45,11 +34,6 @@ pub struct TrustPolicy {
     pub allow_network: bool,
     pub allow_subprocess: bool,
     pub allow_code_graph_read: bool,
-    pub allow_model_inference: bool,
-    pub allow_model_load: bool,
-    pub allow_network_loopback: bool,
-    pub allow_network_private: bool,
-    pub allow_accelerator_use: bool,
     pub allow_plugins: HashSet<String>,
     /// Explicit filesystem roots (required for any filesystem capability).
     pub filesystem_roots: Vec<PathBuf>,
@@ -66,11 +50,6 @@ struct TrustTomlSection {
     allow_network: Option<bool>,
     allow_subprocess: Option<bool>,
     allow_code_graph_read: Option<bool>,
-    allow_model_inference: Option<bool>,
-    allow_model_load: Option<bool>,
-    allow_network_loopback: Option<bool>,
-    allow_network_private: Option<bool>,
-    allow_accelerator_use: Option<bool>,
     allow_plugins: Option<Vec<String>>,
     filesystem_roots: Option<Vec<String>>,
     network_endpoints: Option<Vec<String>>,
@@ -141,21 +120,6 @@ impl TrustPolicy {
             if let Some(v) = trust.allow_code_graph_read {
                 self.allow_code_graph_read = v;
             }
-            if let Some(v) = trust.allow_model_inference {
-                self.allow_model_inference = v;
-            }
-            if let Some(v) = trust.allow_model_load {
-                self.allow_model_load = v;
-            }
-            if let Some(v) = trust.allow_network_loopback {
-                self.allow_network_loopback = v;
-            }
-            if let Some(v) = trust.allow_network_private {
-                self.allow_network_private = v;
-            }
-            if let Some(v) = trust.allow_accelerator_use {
-                self.allow_accelerator_use = v;
-            }
             if let Some(plugins) = trust.allow_plugins {
                 self.allow_plugins.extend(plugins);
             }
@@ -190,11 +154,6 @@ impl TrustPolicy {
             CapabilityClass::Network => self.allow_network,
             CapabilityClass::Subprocess => self.allow_subprocess,
             CapabilityClass::CodeGraphRead => self.allow_code_graph_read,
-            CapabilityClass::ModelInference => self.allow_model_inference,
-            CapabilityClass::ModelLoad => self.allow_model_load,
-            CapabilityClass::NetworkLoopback => self.allow_network_loopback,
-            CapabilityClass::NetworkPrivate => self.allow_network_private,
-            CapabilityClass::AcceleratorUse => self.allow_accelerator_use,
         }
     }
 
@@ -378,13 +337,6 @@ pub(crate) fn capability_class_for_manifest(capability_name: &str) -> Option<Cap
         "code-graph-read" | "code_graph_read" | "codegraph-read" => {
             Some(CapabilityClass::CodeGraphRead)
         }
-        "model-inference" | "model_inference" | "local-llm" | "local_llm" => {
-            Some(CapabilityClass::ModelInference)
-        }
-        "model-load" | "model_load" => Some(CapabilityClass::ModelLoad),
-        "network-loopback" | "network_loopback" => Some(CapabilityClass::NetworkLoopback),
-        "network-private" | "network_private" => Some(CapabilityClass::NetworkPrivate),
-        "accelerator-use" | "accelerator_use" | "gpu" => Some(CapabilityClass::AcceleratorUse),
         _ => None,
     }
 }
@@ -424,39 +376,6 @@ mod tests {
         assert!(!policy.allows_class(CapabilityClass::CodeGraphRead));
         policy.allow_code_graph_read = true;
         assert!(policy.allows_class(CapabilityClass::CodeGraphRead));
-    }
-
-    #[test]
-    fn v05_model_capabilities_map_by_name_and_are_deny_by_default() {
-        let cases = [
-            ("model-inference", CapabilityClass::ModelInference),
-            ("model-load", CapabilityClass::ModelLoad),
-            ("network-loopback", CapabilityClass::NetworkLoopback),
-            ("network-private", CapabilityClass::NetworkPrivate),
-            ("accelerator-use", CapabilityClass::AcceleratorUse),
-        ];
-        for (name, class) in cases {
-            assert_eq!(capability_class_for_manifest(name), Some(class));
-        }
-        let policy = TrustPolicy::default();
-        assert!(!policy.allows_class(CapabilityClass::ModelInference));
-        assert!(!policy.allows_class(CapabilityClass::ModelLoad));
-        assert!(!policy.allows_class(CapabilityClass::NetworkLoopback));
-        assert!(!policy.allows_class(CapabilityClass::NetworkPrivate));
-        assert!(!policy.allows_class(CapabilityClass::AcceleratorUse));
-    }
-
-    #[test]
-    fn model_inference_toggle_from_toml_is_respected() {
-        let toml = "[trust]\nallow_model_inference = true\n";
-        let mut policy = TrustPolicy::default();
-        let dir = std::env::temp_dir().join(format!("lao_trust_test_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("lao.toml");
-        std::fs::write(&path, toml).unwrap();
-        policy.merge_from_file(path.to_str().unwrap());
-        assert!(policy.allows_class(CapabilityClass::ModelInference));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
