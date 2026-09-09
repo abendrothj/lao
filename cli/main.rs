@@ -18,8 +18,8 @@ struct PromptPair {
     workflow: String,
 }
 
-fn normalize_yaml(yaml: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(yaml).unwrap_or(serde_yaml::Value::Null)
+fn normalize_yaml(yaml: &str) -> Result<serde_yaml::Value, String> {
+    serde_yaml::from_str(yaml).map_err(|e| e.to_string())
 }
 
 fn strip_code_fences(s: &str) -> String {
@@ -356,9 +356,28 @@ fn main() {
                         continue;
                     }
                 };
-                let expected = normalize_yaml(&pair.workflow);
-                let actual = normalize_yaml(&generated);
-                let pass = expected == actual;
+                // Strip code fences from generated output (as `prompt` does) and treat
+                // a parse failure on either side as a test failure: two unparseable
+                // documents must never silently compare equal.
+                let generated_clean = strip_code_fences(&generated);
+                let pass = match (
+                    normalize_yaml(&pair.workflow),
+                    normalize_yaml(&generated_clean),
+                ) {
+                    (Ok(expected), Ok(actual)) => expected == actual,
+                    (Err(e), _) => {
+                        eprintln!("Prompt {}: expected workflow is invalid YAML: {}", i + 1, e);
+                        false
+                    }
+                    (_, Err(e)) => {
+                        eprintln!(
+                            "Prompt {}: generated workflow is invalid YAML: {}",
+                            i + 1,
+                            e
+                        );
+                        false
+                    }
+                };
                 if !pass {
                     failures += 1;
                     println!(
@@ -424,6 +443,10 @@ fn main() {
             }
         }
         Commands::DeleteWorkflow { name } => {
+            if let Err(e) = lao_orchestrator_core::path_policy::validate_identifier(&name) {
+                eprintln!("[ERROR] Invalid workflow name: {}", e);
+                std::process::exit(1);
+            }
             let path = format!("workflows/{}.yaml", name);
             match std::fs::remove_file(&path) {
                 Ok(_) => {
