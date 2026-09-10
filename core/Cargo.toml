@@ -26,7 +26,7 @@ doc = false
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-libloading = "0.8"
+libloading = "0.9"
 lao_plugin_api = { path = "../lao_plugin_api" }
 tracing = "0.1"
 toml = "1.1.2"
