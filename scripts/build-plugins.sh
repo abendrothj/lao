@@ -49,7 +49,7 @@ for plugin_dir in "${plugin_dirs[@]}"; do
     # Force a per-plugin target dir so the artifact lands in
     # plugins/<name>/target/release/, where the registry discovers it.
     # (In a workspace, a bare `cargo build` would write to the root target/.)
-    if (cd "$plugin_dir" && cargo build --release --target-dir target 2>/dev/null); then
+    if (cd "$plugin_dir" && cargo build --release --locked --target-dir target 2>/dev/null); then
         echo "OK"
     else
         echo "FAILED"

@@ -26,17 +26,17 @@ jobs:
             archive: tar.gz
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
 
       - name: Build plugins
         shell: bash
         run: bash scripts/build-plugins.sh
 
       - name: Build CLI (release)
-        run: cargo build --release --bin lao-cli
+        run: cargo build --release --bin lao-cli --locked
 
       - name: Package artifacts
         shell: bash
@@ -54,6 +54,6 @@ jobs:
           tar czf "lao-${VERSION}-${{ matrix.target }}.tar.gz" "${STAGING}"
 
       - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           files: lao-*-${{ matrix.target }}.*
