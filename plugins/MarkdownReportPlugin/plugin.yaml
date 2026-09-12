@@ -1,5 +1,5 @@
 name: MarkdownReportPlugin
-version: 0.1.0
+version: 0.3.0
 description: Formats text into a Markdown report, optionally writing it to disk
 maintainer: LAO Contributors
 tags: [markdown, report, format, utility]

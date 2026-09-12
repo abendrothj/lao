@@ -1,5 +1,5 @@
 name: WhisperPlugin
-version: 0.1.0
+version: 0.3.0
 description: Transcribes audio using whisper.cpp
 maintainer: LAO Contributors
 tags: [audio, transcription]

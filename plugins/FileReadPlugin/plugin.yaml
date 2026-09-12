@@ -1,5 +1,5 @@
 name: FileReadPlugin
-version: 0.1.0
+version: 0.3.0
 description: Reads a file from disk and returns its contents as text
 maintainer: LAO Contributors
 tags: [file, io, read, utility]

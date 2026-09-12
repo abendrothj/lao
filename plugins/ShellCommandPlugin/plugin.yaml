@@ -1,5 +1,5 @@
 name: ShellCommandPlugin
-version: 0.1.0
+version: 0.3.0
 description: Runs a trusted shell command and returns its stdout (gated by LAO_ALLOW_SHELL=1)
 maintainer: LAO Contributors
 tags: [shell, command, exec, utility]

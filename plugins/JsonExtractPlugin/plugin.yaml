@@ -1,5 +1,5 @@
 name: JsonExtractPlugin
-version: 0.1.0
+version: 0.3.0
 description: Extracts a value from a JSON document using a dotted path selector
 maintainer: LAO Contributors
 tags: [json, extract, parse, utility]

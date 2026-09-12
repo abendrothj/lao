@@ -1,5 +1,5 @@
 name: RegexExtractPlugin
-version: 0.1.0
+version: 0.3.0
 description: Extracts regex matches from text (first line is the pattern)
 maintainer: LAO Contributors
 tags: [regex, extract, text, utility]

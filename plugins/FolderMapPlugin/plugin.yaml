@@ -1,5 +1,5 @@
 name: FolderMapPlugin
-version: 0.1.0
+version: 0.3.0
 description: Recursively lists files under a directory as a newline-separated map
 maintainer: LAO Contributors
 tags: [file, directory, walk, utility]

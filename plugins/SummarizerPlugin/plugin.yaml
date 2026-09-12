@@ -1,5 +1,5 @@
 name: SummarizerPlugin
-version: 0.1.0
+version: 0.3.0
 description: Summarizes input text using a local LLM
 maintainer: LAO Contributors
 tags: [text, summarization]
